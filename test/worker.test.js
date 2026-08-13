@@ -12,12 +12,26 @@
 
 import test, { describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { rm } from 'node:fs/promises';
 import { unstable_startWorker } from 'wrangler';
 
 const PIN = 'test-pin-1234';
 
 let worker;
 let origin;
+
+/** Start a workerd instance. A distinct `LOG_INSTANCE` is a distinct log. */
+const startWorker = ({ instance, persist = false } = {}) => unstable_startWorker({
+  config: 'wrangler.toml',
+  bindings: {
+    ADMIN_PIN: { type: 'plain_text', value: PIN },
+    ...(instance ? { LOG_INSTANCE: { type: 'plain_text', value: instance } } : {}),
+  },
+  // worker.url resolves to a URL object, not a string.
+  dev: { persist, inspector: { port: 0 }, server: { port: 0 } },
+});
+
+const originOf = async (w) => String(await w.url).replace(/\/$/, '');
 
 /** POST an entry, returning [status, body]. */
 async function post(entry, { pin = PIN, raw = null, headers = {} } = {}) {
@@ -42,13 +56,8 @@ const entry = (overrides = {}) => ({
 });
 
 before(async () => {
-  worker = await unstable_startWorker({
-    config: 'wrangler.toml',
-    bindings: { ADMIN_PIN: { type: 'plain_text', value: PIN } },
-    dev: { persist: false, inspector: { port: 0 }, server: { port: 0 } },
-  });
-  // worker.url resolves to a URL object, not a string.
-  origin = String(await worker.url).replace(/\/$/, '');
+  worker = await startWorker();
+  origin = await originOf(worker);
 });
 
 after(async () => {
@@ -57,11 +66,19 @@ after(async () => {
 
 describe('GET /log', () => {
   test('an empty log is an empty list, not an error', async () => {
-    const [status, body] = await getLog();
-    assert.equal(status, 200);
-    assert.deepEqual(body.entries, []);
-    assert.equal(body.count, 0);
-    assert.equal(body.lastId, 0);
+    // Its own namespace: "empty" must be a property of a fresh log, not of this test happening
+    // to run before anything has posted.
+    const fresh = await startWorker({ instance: 'empty-log-fixture' });
+    try {
+      const response = await fresh.fetch(`${await originOf(fresh)}/log`);
+      const body = await response.json();
+      assert.equal(response.status, 200);
+      assert.deepEqual(body.entries, []);
+      assert.equal(body.count, 0);
+      assert.equal(body.lastId, 0);
+    } finally {
+      await fresh.dispose();
+    }
   });
 
   test('entries come back in the shape the client sent, plus a server id', async () => {
@@ -135,6 +152,14 @@ describe('POST /log — the PIN gate', () => {
 });
 
 describe('POST /log — validation', () => {
+  // Corrections need a real id to target, and the id of an entry this suite posted itself is
+  // the only one it can name without depending on what ran before it.
+  let targetId;
+  before(async () => {
+    const [, body] = await post(entry({ uuid: 'correction-target-uuid' }));
+    targetId = body.entry.id;
+  });
+
   test('malformed JSON is 400 and leaves the log untouched', async () => {
     const [, beforeBody] = await getLog();
     const [status, body] = await post(null, { raw: '{"type": "time", oops' });
@@ -171,7 +196,7 @@ describe('POST /log — validation', () => {
   });
 
   test('a valid correction is accepted', async () => {
-    const [status] = await post({ type: 'correction', uuid: 'good-correction-uuid', targets: 1 });
+    const [status] = await post({ type: 'correction', uuid: 'good-correction-uuid', targets: targetId });
     assert.equal(status, 201);
   });
 
@@ -194,7 +219,7 @@ describe('POST /log — validation', () => {
     // `replacement: "garbage"` would otherwise spread into {"0":"g","1":"a",...} and sit in
     // the permanent log scoring nothing.
     const [status, body] = await post({
-      type: 'correction', uuid: 'garbage-replacement-1', targets: 1, replacement: 'garbage',
+      type: 'correction', uuid: 'garbage-replacement-1', targets: targetId, replacement: 'garbage',
     });
     assert.equal(status, 400);
     assert.match(body.error, /replacement must be a JSON object/);
@@ -202,7 +227,7 @@ describe('POST /log — validation', () => {
 
   test('a replacement with an unknown type is rejected', async () => {
     const [status, body] = await post({
-      type: 'correction', uuid: 'bad-replacement-type1', targets: 1,
+      type: 'correction', uuid: 'bad-replacement-type1', targets: targetId,
       replacement: { type: 'tmie', event: 'swim', player: 'Lucas', value: 61 },
     });
     assert.equal(status, 400);
@@ -213,7 +238,7 @@ describe('POST /log — validation', () => {
     // Replacements are spliced straight into the effective log and never re-processed as
     // corrections, so a nested one would silently do nothing.
     const [status, body] = await post({
-      type: 'correction', uuid: 'nested-correction-01', targets: 1,
+      type: 'correction', uuid: 'nested-correction-01', targets: targetId,
       replacement: { type: 'correction', targets: 1 },
     });
     assert.equal(status, 400);
@@ -222,10 +247,38 @@ describe('POST /log — validation', () => {
 
   test('a well-formed replacement is accepted', async () => {
     const [status] = await post({
-      type: 'correction', uuid: 'good-replacement-001', targets: 1,
+      type: 'correction', uuid: 'good-replacement-001', targets: targetId,
       replacement: { type: 'time', event: 'swim', player: 'Lucas', value: 61 },
     });
     assert.equal(status, 201);
+  });
+
+  test('a replacement carrying its own id or uuid is rejected', async () => {
+    // It inherits the correction's identity when it is spliced in, so one that brings its own
+    // would sit in the permanent log claiming an identity that is not its.
+    const [idStatus, idBody] = await post({
+      type: 'correction', uuid: 'replacement-with-id1', targets: targetId,
+      replacement: { type: 'time', id: 7, event: 'swim', player: 'Lucas', value: 61 },
+    });
+    assert.equal(idStatus, 400);
+    assert.match(idBody.error, /id or uuid/);
+
+    const [uuidStatus] = await post({
+      type: 'correction', uuid: 'replacement-with-uuid', targets: targetId,
+      replacement: { type: 'time', uuid: 'smuggled-uuid-01', event: 'swim', player: 'Lucas', value: 61 },
+    });
+    assert.equal(uuidStatus, 400);
+  });
+
+  test('an oversized body is 413, measured in BYTES and not characters', async () => {
+    // 30k three-byte characters: 30k UTF-16 units, which is well under the 64k cap by the
+    // wrong measure, and ~90k bytes, which is over it by the right one.
+    const [status] = await post(null, {
+      raw: JSON.stringify({
+        type: 'knob', uuid: 'oversize-body-uuid', value: 1.2, note: '★'.repeat(30_000),
+      }),
+    });
+    assert.equal(status, 413);
   });
 
   test('every rejected correction left the log untouched', async () => {
@@ -233,6 +286,7 @@ describe('POST /log — validation', () => {
     const rejected = [
       'ghost-target-uuid', 'zero-target-uuid', 'neg-target-uuid1',
       'garbage-replacement-1', 'bad-replacement-type1', 'nested-correction-01',
+      'replacement-with-id1', 'replacement-with-uuid', 'oversize-body-uuid',
     ];
     for (const uuid of rejected) {
       assert.equal(body.entries.some((e) => e.uuid === uuid), false, `${uuid} must not be in the log`);
@@ -257,8 +311,13 @@ describe('POST /log — append semantics', () => {
     const sent = await Promise.all(
       Array.from({ length: 8 }, (_, i) => post(entry({ uuid: `concurrent-${i}-bbbbbbbb` }))),
     );
-    const ids = sent.map(([, body]) => body.entry.id);
+    const ids = sent.map(([, body]) => body.entry.id).sort((a, b) => a - b);
     assert.equal(new Set(ids).size, ids.length, 'no id may be handed out twice');
+    // Contiguous, not merely distinct: the Durable Object serializes appends, so eight
+    // concurrent writes must come out as eight consecutive ids with nothing skipped.
+    for (let i = 1; i < ids.length; i += 1) {
+      assert.equal(ids[i], ids[i - 1] + 1, `id ${ids[i]} must follow ${ids[i - 1]}`);
+    }
   });
 
   test('a duplicate UUID is dropped and answers 200, not 201', async () => {
@@ -320,20 +379,14 @@ describe('routing', () => {
 describe('LOG_INSTANCE gives a clean log without destroying the old one', () => {
   const persistPath = `${process.env.TMPDIR ?? '/tmp'}/ggg-instance-test-${process.pid}`;
 
-  const startAs = (instance) => unstable_startWorker({
-    config: 'wrangler.toml',
-    bindings: {
-      ADMIN_PIN: { type: 'plain_text', value: PIN },
-      LOG_INSTANCE: { type: 'plain_text', value: instance },
-    },
-    dev: { persist: persistPath, inspector: { port: 0 }, server: { port: 0 } },
-  });
+  const startAs = (instance) => startWorker({ instance, persist: persistPath });
 
-  const fetchLog = async (w) => {
-    const url = String(await w.url).replace(/\/$/, '');
-    const response = await w.fetch(`${url}/log`);
-    return response.json();
-  };
+  const fetchLog = async (w) => (await w.fetch(`${await originOf(w)}/log`)).json();
+
+  // This is the one suite that writes to disk, so it is the one suite that has to clean up.
+  after(async () => {
+    await rm(persistPath, { recursive: true, force: true });
+  });
 
   test('switching the instance yields an empty log; switching back restores the old one', async () => {
     const rehearsal = await startAs('rehearsal-fixture');
@@ -399,10 +452,11 @@ describe('LOG_INSTANCE gives a clean log without destroying the old one', () => 
 describe('end to end: the log round-trips through the real scoring engine', () => {
   test('entries posted here score the same as entries built in memory', async () => {
     const { score, effectiveLog } = await import('../src/scoring.js');
+    const { ROSTER } = await import('../src/rules-config.js');
     const [, body] = await getLog();
     // The engine must tolerate whatever accumulated above without throwing.
     const result = score(effectiveLog(body.entries));
-    assert.equal(result.players.length, 11);
+    assert.equal(result.players.length, ROSTER.length);
     assert.ok(result.players.every((p) => Number.isFinite(p.total)));
   });
 });

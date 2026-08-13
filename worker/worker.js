@@ -46,6 +46,8 @@ const PIN_HEADER = 'x-combine-pin';
 /** Generous for a draft assignment (11 names), absurd for anything else. */
 const MAX_BODY_BYTES = 64 * 1024;
 
+const encoder = new TextEncoder();
+
 /** Poll cadence is ≤10s and the freshness budget is 15s, so 5s of staleness is free. */
 const GET_CACHE_SECONDS = 5;
 
@@ -184,7 +186,9 @@ async function handlePost(request, env, stub) {
   }
 
   const raw = await request.text();
-  if (raw.length > MAX_BODY_BYTES) {
+  // Bytes, not characters: `raw.length` counts UTF-16 units, so a body made of multi-byte
+  // characters could be three times the size this constant names before it tripped.
+  if (encoder.encode(raw).length > MAX_BODY_BYTES) {
     return problem(413, 'Entry too large.');
   }
 
@@ -237,6 +241,12 @@ function validate(entry) {
         // Replacements are spliced straight into the effective log; they are never
         // re-processed as corrections, so one nested here would silently do nothing.
         return 'A correction replacement cannot itself be a correction.';
+      }
+      if (Object.hasOwn(entry.replacement, 'id') || Object.hasOwn(entry.replacement, 'uuid')) {
+        // A replacement inherits the correction's identity when it is spliced in, so one
+        // carrying its own is stating something nothing will honour — and it would sit in the
+        // permanent log claiming an id or uuid that is not its own, which is what an audit reads.
+        return 'A correction replacement carries no id or uuid of its own — it inherits the correction\'s.';
       }
     }
   }

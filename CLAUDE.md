@@ -28,7 +28,7 @@ npx wrangler secret put ADMIN_PIN   # set/rotate the commissioner PIN
 
 For `wrangler dev`, put the PIN in a **`.dev.vars`** file (gitignored) so local writes work:
 
-```
+```dotenv
 ADMIN_PIN=whatever-you-like-locally
 ```
 
