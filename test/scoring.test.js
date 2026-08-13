@@ -786,7 +786,7 @@ describe('volleyball best-of-3', () => {
       { type: 'volleyball_set', event: 'volleyball', matchSlot: 1, setNo: 1, scores: { TM: 21, TH: 10 } },
       { type: 'volleyball_set', event: 'volleyball', matchSlot: 1, setNo: 2, scores: { TM: 10, TH: 21 } },
       { type: 'volleyball_set', event: 'volleyball', matchSlot: 1, setNo: 3, scores: { TM: 21, TH: 10 } },
-      { type: 'volleyball_set', event: 'volleyball', matchSlot: 1, setNo: 4, scores: { TM: 10, TH: 21 } },
+      { type: 'volleyball_set', event: 'volleyball', matchSlot: 1, setNo: 4, scores: { TM: 12, TH: 21 } },
     ]);
     const result2 = run(log);
     const match = result2.events.volleyball.matches[0];
@@ -798,8 +798,9 @@ describe('volleyball best-of-3', () => {
     const issue = result2.issues.find((i) => i.code === 'too-many-sets');
     assert.ok(issue, 'the fourth set must surface');
     assert.equal(issue.level, 'warn');
-    // Every set played still counts toward the differential (Brad, 2026-08-13): +11 −11 +11 −11.
-    assert.equal(result2.events.volleyball.ctx.stats.TM.pointDiff, 0);
+    // Every set played still counts toward the differential (Brad, 2026-08-13): the four
+    // margins are +11 −11 +11 −9, so the fourth set is the difference between 2 and 11.
+    assert.equal(result2.events.volleyball.ctx.stats.TM.pointDiff, 2);
   });
 
   test('a 3–1 match still resolves, and still flags the extra set', () => {
@@ -870,7 +871,7 @@ describe("Tyler's burn ledger", () => {
     assert.equal(result.burns.burned.includes(null), false, 'nobody is burned by an unknown team');
     assert.equal(slot.player, null);
     assert.equal(slot.unresolvedTarget, 'TM');
-    assert.ok(Array.isArray(slot.eligible), 'the slot keeps its eligible pool');
+    assert.deepEqual(slot.eligible, [], 'no volleyball team exists yet, so none is eligible');
     assert.ok(codes(result).includes('pick-target-unknown'));
 
     // It heals itself the moment the draft lands — no correction needed.
@@ -878,6 +879,38 @@ describe("Tyler's burn ledger", () => {
     const healed = run(drafted);
     assert.equal(healed.burns.slots.find((s) => s.stage === 'volleyball').player, 'Mitch');
     assert.equal(codes(healed).includes('pick-target-unknown'), false);
+
+    // A pick naming a team the draft does not contain waits the same way — and now the pool it
+    // offers is the real one, minus the team whose captain is already burned.
+    const typo = append(drafted, [{ type: 'tyler_pick', stage: 'volleyball', target: 'TX' }]);
+    const mistyped = run(typo).burns.slots.find((s) => s.stage === 'volleyball');
+    assert.equal(mistyped.player, null);
+    assert.deepEqual(mistyped.eligible, ['TM', 'TH'], 'TW is out — Wyatt is already burned');
+  });
+
+  test('a pick naming somebody who is not a player is rejected, not burned', () => {
+    // Same rule from the other side: a name nobody on the roster answers to cannot burn anyone,
+    // and must not let the ledger claim five burns when one of them is fiction.
+    const log = buildLog([
+      { type: 'draft_assignment', event: 'beerball', teams: BEERBALL_PAIRS }, // burns Brad, Wyatt
+      { type: 'tyler_pick', stage: 'swim', target: 'Luke' }, // there is no Luke
+      ...ABLE.map((player, i) => ({ type: 'time', event: 'swim', player, value: 50 + i })),
+      { type: 'event_final', event: 'swim' },
+    ]);
+    const result = run(log);
+    const slot = result.burns.slots.find((s) => s.stage === 'swim');
+
+    assert.equal(slot.player, null);
+    assert.equal(slot.unresolvedTarget, 'Luke');
+    assert.equal(result.burns.burned.includes('Luke'), false, 'a phantom never enters the ledger');
+    assert.equal(result.burns.complete, false);
+    assert.deepEqual(slot.eligible, ABLE.filter((p) => !['Brad', 'Wyatt'].includes(p)));
+
+    const issue = result.issues.find((i) => i.code === 'pick-target-unknown');
+    assert.ok(issue, 'the bad name must surface');
+    assert.match(issue.message, /not an eligible player/);
+    // Tyler backs nobody, so he earns nothing here — the issue is what explains the 0.
+    assert.equal(result.events.swim.points.Tyler, 0);
   });
 
   test('correcting a pick before the event recomputes the pool', () => {
@@ -1110,7 +1143,8 @@ describe('championship tiebreak chain (spec §7)', () => {
    *
    * The Gauntlet dead heat is what keeps them level while handing both of them a complete set
    * of three individual placements, which §7's average-placement step requires. Everyone else
-   * is paired to land far below: the best of them is Murph at 108.78 + 85.56 = 194.3.
+   * is paired to land far below: the best of them is Murph, at Swim 2nd (97.78) + Bags 10th (11)
+   * + Gauntlet 3rd (85.56) = 194.3.
    */
   test('a tie on total is broken by the lowest average individual placement', () => {
     const swimOrder = ['Stu', 'Murph', 'Josh', 'Lucas', 'Mitch', 'Yuyi', 'ATM', 'Helwig', 'Brad', 'Wyatt'];

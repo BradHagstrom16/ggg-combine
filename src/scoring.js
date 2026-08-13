@@ -432,11 +432,14 @@ export function buildBurns({ drafts, picks, teamsByEvent }) {
       ? teams.filter((t) => !burned.has(t.captain)).map((t) => t.id)
       : eligible;
 
-    // A team pick entered before its draft names a team nobody has seen yet. That is an
-    // unresolved pick, not a burn of nobody: claiming `null` would put null in the burn list
-    // and cost the slot the eligible pool the UI shows. It resolves itself when the draft lands.
+    // A pick can name something that does not resolve: a team entered before its draft, or a
+    // player who is not on the roster at all. Either is an unresolved pick, not a burn of
+    // nobody — claiming the bad target would put a phantom in the burn list and let the ledger
+    // report five burns when one of them is a name that does not exist. The slot waits instead,
+    // keeping the eligible pool the UI shows; a team pick heals itself when the draft lands.
     const team = isTeamPick ? teams.find((t) => t.id === pick?.target) : null;
-    if (!pick || (isTeamPick && !team)) {
+    const resolved = isTeamPick ? Boolean(team) : ABLE.includes(pick?.target);
+    if (!pick || !resolved) {
       slots.push({
         slot: stageDef.slots[0], stage: stageDef.stage, label: stageDef.label,
         player: null, eligible: eligibleTargets,
@@ -539,7 +542,9 @@ export function score(effective, options = {}) {
   for (const slot of burns.slots) {
     if (!slot.unresolvedTarget) continue;
     addIssue('warn', 'pick-target-unknown',
-      `${GM}'s ${EVENTS[slot.stage].label} pick names ${slot.unresolvedTarget}, which is not in that draft — enter the draft and the pick resolves itself.`,
+      TYLER_BACKING[slot.stage].unit === 'team'
+        ? `${GM}'s ${EVENTS[slot.stage].label} pick names ${slot.unresolvedTarget}, which is not a team in that draft — enter the draft and the pick resolves itself.`
+        : `${GM}'s ${EVENTS[slot.stage].label} pick names ${slot.unresolvedTarget}, who is not an eligible player — re-enter the pick.`,
       { stage: slot.stage, target: slot.unresolvedTarget });
   }
   for (const dup of burns.duplicates) {
