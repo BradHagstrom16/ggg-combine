@@ -933,8 +933,34 @@ describe("Tyler's burn ledger", () => {
     const issue = result.issues.find((i) => i.code === 'pick-target-unknown');
     assert.ok(issue, 'the bad name must surface');
     assert.match(issue.message, /not an eligible player/);
-    // Tyler backs nobody, so he earns nothing here — the issue is what explains the 0.
-    assert.equal(result.events.swim.points.Tyler, 0);
+    // The pick burned nobody, so it pays nobody: pending, not a 0 that looks like a result.
+    assert.equal('Tyler' in result.events.swim.points, false);
+    assert.equal(row(result, 'Tyler').byEvent.swim.pending, true);
+  });
+
+  test('a duplicate burn pays Tyler nothing until the pick is fixed', () => {
+    // Spec §6 makes the points and the burn the same act, and §6.1 requires all five burns to
+    // be unique — so picking Brad, whom his own Beer Ball pair already burned, is not a pick
+    // that can score. Showing him Brad's points would fold an illegal pick into the §7 total.
+    const log = buildLog([
+      { type: 'draft_assignment', event: 'beerball', teams: BEERBALL_PAIRS }, // burns Brad, Wyatt
+      { type: 'tyler_pick', stage: 'swim', target: 'Brad' },
+      ...ABLE.map((player, i) => ({ type: 'time', event: 'swim', player, value: 50 + i })),
+    ]);
+    const result = run(log);
+
+    assert.ok(codes(result).includes('duplicate-burn'));
+    assert.ok(result.events.swim.points.Brad > 0, 'Brad himself still scores, of course');
+    assert.equal('Tyler' in result.events.swim.points, false, 'but the illegal pick pays nothing');
+    assert.equal(row(result, 'Tyler').byEvent.swim.pending, true);
+    assert.equal(result.events.swim.placement.Tyler, undefined, 'and carries no §7 placement');
+    assert.equal(result.events.swim.tylerSource, null);
+
+    // Re-entering a legal pick heals it — latest-wins, no correction needed.
+    const healed = run(append(log, [{ type: 'tyler_pick', stage: 'swim', target: 'Lucas' }]));
+    assert.equal(codes(healed).includes('duplicate-burn'), false);
+    assert.equal(healed.events.swim.points.Tyler, healed.events.swim.points.Lucas);
+    assert.equal(healed.events.swim.placement.Tyler, healed.events.swim.placement.Lucas);
   });
 
   test('correcting a pick before the event recomputes the pool', () => {

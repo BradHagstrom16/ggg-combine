@@ -565,7 +565,7 @@ export function score(effective, options = {}) {
   }
 
   // --- Tyler's derived points ----------------------------------------------------------
-  applyTylerBacking(events, { picks, teamsByEvent, addIssue });
+  applyTylerBacking(events, { picks, teamsByEvent, burns, addIssue });
 
   // --- totals, ranks, champion ---------------------------------------------------------
   const players = buildPlayerRows(events);
@@ -851,8 +851,16 @@ function volleyballDetail(effective, teams) {
  * Spec §6: Tyler earns the EXACT final points of whoever he backed — his pair's points, his
  * picked swimmer's (already knob-multiplied) points, his picked volleyball team's points.
  * Pass-through, never recomputed, so his cell always matches theirs to the decimal.
+ *
+ * A pick only pays if it BURNED somebody. In spec §6 the points and the burn are the same act,
+ * so a pick that burned nobody — never made, naming a target that does not resolve, or spending
+ * a burn Tyler already spent (§6.1: all five unique) — earns nothing, and his cell renders
+ * pending until it is fixed (Brad, 2026-08-13). Showing points from an illegal pick would put a
+ * number on the TV that he is not entitled to, and quietly fold it into the §7 championship.
+ * The burn ledger is the single source of truth for that: it has already run every check, and
+ * each failure has already named itself in `issues`.
  */
-function applyTylerBacking(events, { picks, teamsByEvent, addIssue }) {
+function applyTylerBacking(events, { picks, teamsByEvent, burns, addIssue }) {
   for (const [eventId, backing] of Object.entries(TYLER_BACKING)) {
     if (backing.mode === 'plays') continue;
     const event = events[eventId];
@@ -877,6 +885,12 @@ function applyTylerBacking(events, { picks, teamsByEvent, addIssue }) {
       addIssue('warn', 'tyler-no-pick',
         `${GM} has not picked for ${EVENTS[eventId].label} — no points until he does.`,
         { event: eventId });
+      continue;
+    }
+
+    const slot = burns.slots.find((s) => s.stage === eventId);
+    if (!slot?.player || slot.duplicateOf) {
+      event.tylerSource = null; // the pick burned nobody: unresolved target, or already spent
       continue;
     }
 

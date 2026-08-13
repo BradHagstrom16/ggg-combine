@@ -120,6 +120,11 @@ visible, audited fixes. Nothing is ever mutated or deleted.
 - **Round-robin ties use a group-wise resolver, not a pairwise comparator chain.** Head-to-head
   is non-transitive: a 3-way circular knot must be *detected* and flagged
   `manual-resolution-required` (Brad enters an `override`), never silently ordered.
+- **A pick only pays if it burned somebody** (Brad, 2026-08-13). In spec §6 the points and the
+  burn are the same act, so a `tyler_pick` that burned nobody — never made, naming a target that
+  does not resolve, or duplicating a burn already spent (§6.1) — earns nothing and renders
+  pending, never a 0 that reads like a result. The burn ledger decides; `applyTylerBacking`
+  never re-derives it.
 - **Pending ≠ zero.** A missing result *before* that event's `event_final` renders as pending
   (hatched, no points). *After* `event_final` it is 0 points — a warning chip, **not an error**
   (spec §3.2 / §10.6).
