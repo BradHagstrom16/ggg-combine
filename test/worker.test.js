@@ -247,6 +247,91 @@ describe('routing', () => {
   });
 });
 
+/**
+ * The reset path. Before Aug 28 the rehearsal's fake weekend has to stop counting, and the
+ * mechanism is a different Durable Object instance name — so this needs to be genuinely
+ * isolated, not merely "probably". These workers share one persistence directory, so if the
+ * instance name were ignored they would see each other's entries and the test would fail.
+ */
+describe('LOG_INSTANCE gives a clean log without destroying the old one', () => {
+  const persistPath = `${process.env.TMPDIR ?? '/tmp'}/ggg-instance-test-${process.pid}`;
+
+  const startAs = (instance) => unstable_startWorker({
+    config: 'wrangler.toml',
+    bindings: {
+      ADMIN_PIN: { type: 'plain_text', value: PIN },
+      LOG_INSTANCE: { type: 'plain_text', value: instance },
+    },
+    dev: { persist: persistPath, inspector: { port: 0 }, server: { port: 0 } },
+  });
+
+  const fetchLog = async (w) => {
+    const url = String(await w.url).replace(/\/$/, '');
+    const response = await w.fetch(`${url}/log`);
+    return response.json();
+  };
+
+  test('switching the instance yields an empty log; switching back restores the old one', async () => {
+    const rehearsal = await startAs('rehearsal-fixture');
+    try {
+      const url = String(await rehearsal.url).replace(/\/$/, '');
+      await rehearsal.fetch(`${url}/log`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-combine-pin': PIN },
+        body: JSON.stringify({ type: 'knob', uuid: 'instance-rehearsal-1', value: 1.4 }),
+      });
+      const body = await fetchLog(rehearsal);
+      assert.equal(body.count, 1);
+      assert.equal(body.instance, 'rehearsal-fixture');
+    } finally {
+      await rehearsal.dispose();
+    }
+
+    const live = await startAs('live-fixture');
+    try {
+      const body = await fetchLog(live);
+      assert.equal(body.count, 0, 'the live namespace must start empty');
+      assert.deepEqual(body.entries, []);
+      assert.equal(body.instance, 'live-fixture');
+    } finally {
+      await live.dispose();
+    }
+
+    // The rehearsal log is not destroyed — it is still there to inspect.
+    const again = await startAs('rehearsal-fixture');
+    try {
+      const body = await fetchLog(again);
+      assert.equal(body.count, 1, 'the rehearsal log survives the switch');
+      assert.equal(body.entries[0].uuid, 'instance-rehearsal-1');
+    } finally {
+      await again.dispose();
+    }
+  });
+
+  test('the instance name is part of the ETag, so a switch invalidates cached polls', async () => {
+    const a = await startAs('etag-a');
+    let etagA;
+    try {
+      const url = String(await a.url).replace(/\/$/, '');
+      etagA = (await a.fetch(`${url}/log`)).headers.get('etag');
+    } finally {
+      await a.dispose();
+    }
+
+    const b = await startAs('etag-b');
+    try {
+      const url = String(await b.url).replace(/\/$/, '');
+      const response = await b.fetch(`${url}/log`, { headers: { 'if-none-match': etagA } });
+      // Both logs are empty, so without the instance in the ETag this would 304 — and a
+      // viewer could sit on a cached board from the wrong namespace.
+      assert.equal(response.status, 200);
+      assert.notEqual(response.headers.get('etag'), etagA);
+    } finally {
+      await b.dispose();
+    }
+  });
+});
+
 describe('end to end: the log round-trips through the real scoring engine', () => {
   test('entries posted here score the same as entries built in memory', async () => {
     const { score, effectiveLog } = await import('../src/scoring.js');

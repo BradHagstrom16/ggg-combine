@@ -29,3 +29,16 @@ storage = "sqlite"
 # ADMIN_PIN is a secret, NOT a var — set it with:
 #   npx wrangler secret put ADMIN_PIN
 # It must never appear in this file or anywhere else in git.
+
+[vars]
+# Which Durable Object instance holds the log. Changing this and redeploying gives a
+# GUARANTEED-EMPTY log, leaving the old one intact and inspectable.
+#
+# There is exactly one planned use: the dress rehearsal enters a full fake weekend against
+# production, and those entries must not still be in the log on Aug 28. Switch this to
+# "live-2026" after the rehearsal passes, redeploy, and confirm GET /log answers
+# {"count":0, "instance":"live-2026"} before the first real result goes in.
+#
+# Do NOT change it during the event. GET /log echoes the value back so a mistake is visible
+# instead of silently serving an empty board.
+LOG_INSTANCE = "rehearsal"

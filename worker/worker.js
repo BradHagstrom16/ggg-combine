@@ -22,8 +22,24 @@
 import { DurableObject } from 'cloudflare:workers';
 import { ENTRY_TYPES } from '../src/entry-types.js';
 
-/** One log, one Durable Object instance, forever. The name is the whole namespace. */
-const LOG_SINGLETON = 'log';
+/**
+ * The Durable Object instance name — the whole namespace for one log.
+ *
+ * Configurable (`LOG_INSTANCE` in wrangler.toml) purely so the log can be RESET. The dress
+ * rehearsal enters a full fake weekend against production, and those ~40 entries would
+ * otherwise still be in the permanent log when the real combine starts. Pointing at a new
+ * instance name hands us a guaranteed-empty log while leaving the rehearsal's log intact and
+ * inspectable, which is much less frightening the week of the event than deleting the Worker.
+ *
+ * A typo here would silently serve an empty board mid-Gauntlet, so `GET /log` echoes the
+ * instance name back and the fallback is the same default rather than a blank.
+ */
+const DEFAULT_LOG_INSTANCE = 'log';
+
+function logInstance(env) {
+  const configured = env.LOG_INSTANCE;
+  return typeof configured === 'string' && configured.trim() ? configured.trim() : DEFAULT_LOG_INSTANCE;
+}
 
 const PIN_HEADER = 'x-combine-pin';
 
@@ -113,9 +129,10 @@ export default {
       return new Response('Not found', { status: 404 });
     }
 
-    const stub = env.LOG.get(env.LOG.idFromName(LOG_SINGLETON));
+    const instance = logInstance(env);
+    const stub = env.LOG.get(env.LOG.idFromName(instance));
 
-    if (request.method === 'GET') return handleGet(request, stub);
+    if (request.method === 'GET') return handleGet(request, stub, instance);
     if (request.method === 'POST') return handlePost(request, env, stub);
     return new Response('Method not allowed', {
       status: 405,
@@ -124,13 +141,15 @@ export default {
   },
 };
 
-async function handleGet(request, stub) {
+async function handleGet(request, stub, instance) {
   const entries = await stub.list();
   const lastId = entries.length ? entries[entries.length - 1].id : 0;
 
   // The log is append-only, so (count, lastId) identifies its contents exactly — no hashing
-  // needed. A poll that finds nothing new costs a 304 with an empty body.
-  const etag = `W/"${entries.length}-${lastId}"`;
+  // needed. A poll that finds nothing new costs a 304 with an empty body. The instance is in
+  // the ETag too: switching namespaces must invalidate every cached poll, or a viewer holding
+  // an old ETag could 304 its way into showing the wrong log entirely.
+  const etag = `W/"${instance}-${entries.length}-${lastId}"`;
   const headers = {
     etag,
     'cache-control': `public, max-age=${GET_CACHE_SECONDS}`,
@@ -139,7 +158,7 @@ async function handleGet(request, stub) {
   if (request.headers.get('if-none-match') === etag) {
     return new Response(null, { status: 304, headers });
   }
-  return Response.json({ entries, count: entries.length, lastId }, { headers });
+  return Response.json({ entries, count: entries.length, lastId, instance }, { headers });
 }
 
 async function handlePost(request, env, stub) {
