@@ -337,9 +337,19 @@ function volleyballMatches(sets) {
       const winner = set.scores[a] > set.scores[b] ? a : set.scores[b] > set.scores[a] ? b : null;
       if (winner) setWins[winner] = (setWins[winner] ?? 0) + 1;
     }
-    const winner = Object.entries(setWins)
-      .find(([, w]) => w >= EVENTS.volleyball.setsToWin)?.[0] ?? null;
-    matches.push({ matchSlot, sets: ordered, setWins, winner, teams: [...teamIds] });
+    // The match goes to the team with the most sets — but only when it actually has more than
+    // anyone else. If a fourth set gets logged and the match sits 2–2, both teams clear
+    // `setsToWin` and `find()` would hand the match to whichever set was entered first. An
+    // undecided match keeps the event visibly pending, which is the honest answer.
+    const [top, runnerUp] = Object.entries(setWins).sort((a, b) => b[1] - a[1]);
+    const decided = top && top[1] >= EVENTS.volleyball.setsToWin && (!runnerUp || runnerUp[1] < top[1]);
+    matches.push({
+      matchSlot, sets: ordered, setWins, teams: [...teamIds],
+      winner: decided ? top[0] : null,
+      // Flagged, never truncated: point differential sums margins across ALL sets played
+      // (Brad, 2026-08-13), so dropping the extra set would quietly change a rule.
+      extraSets: ordered.length > EVENTS.volleyball.maxSets,
+    });
   }
   return matches.sort((a, b) => a.matchSlot - b.matchSlot);
 }
@@ -414,28 +424,29 @@ export function buildBurns({ drafts, picks, teamsByEvent }) {
       continue;
     }
 
+    const isTeamPick = TYLER_BACKING[stageDef.stage].unit === 'team';
+    const teams = teamsByEvent[stageDef.stage] ?? [];
     const pick = picks[stageDef.stage];
-    if (!pick) {
-      // Volleyball offers teams whose captain is still unburned; the others offer players.
-      const eligibleTargets = TYLER_BACKING[stageDef.stage].unit === 'team'
-        ? (teamsByEvent[stageDef.stage] ?? [])
-          .filter((t) => !burned.has(t.captain))
-          .map((t) => t.id)
-        : eligible;
+    // Volleyball offers teams whose captain is still unburned; the others offer players.
+    const eligibleTargets = isTeamPick
+      ? teams.filter((t) => !burned.has(t.captain)).map((t) => t.id)
+      : eligible;
+
+    // A team pick entered before its draft names a team nobody has seen yet. That is an
+    // unresolved pick, not a burn of nobody: claiming `null` would put null in the burn list
+    // and cost the slot the eligible pool the UI shows. It resolves itself when the draft lands.
+    const team = isTeamPick ? teams.find((t) => t.id === pick?.target) : null;
+    if (!pick || (isTeamPick && !team)) {
       slots.push({
         slot: stageDef.slots[0], stage: stageDef.stage, label: stageDef.label,
         player: null, eligible: eligibleTargets,
+        ...(pick ? { unresolvedTarget: pick.target } : {}),
       });
       continue;
     }
 
-    if (TYLER_BACKING[stageDef.stage].unit === 'team') {
-      const team = (teamsByEvent[stageDef.stage] ?? []).find((t) => t.id === pick.target);
-      claim(team?.captain ?? null, stageDef.stage, stageDef.slots[0], stageDef.label);
-      slots[slots.length - 1].team = pick.target;
-    } else {
-      claim(pick.target, stageDef.stage, stageDef.slots[0], stageDef.label);
-    }
+    claim(isTeamPick ? team.captain : pick.target, stageDef.stage, stageDef.slots[0], stageDef.label);
+    if (isTeamPick) slots[slots.length - 1].team = pick.target;
   }
 
   const duplicates = slots.filter((s) => s.duplicateOf);
@@ -476,10 +487,28 @@ export function score(effective, options = {}) {
   }
 
   // --- drafts -------------------------------------------------------------------------
+  // Shapes are checked here, at the one place drafts enter, because everything downstream
+  // (validation, team scoring, the burn ledger, Tyler's backing) walks `teams` and
+  // `team.members` without looking first. The worker only checks that an entry has a known
+  // `type`, so a malformed draft can reach the log — and the log is permanent. Throwing on it
+  // would take the standings, the TV and admin down for the rest of the weekend; dropping it
+  // with a loud issue keeps the board alive and tells Brad what to re-enter.
   const teamsByEvent = {};
   for (const eventId of EVENT_ORDER) {
     const draft = latest.get(`draft_assignment:${eventId}`);
-    if (draft) teamsByEvent[eventId] = draft.teams ?? [];
+    if (!draft) continue;
+    const declared = Array.isArray(draft.teams) ? draft.teams : [];
+    const usable = declared.filter((team) => team && Array.isArray(team.members));
+    if (!Array.isArray(draft.teams)) {
+      addIssue('error', 'bad-draft-entry',
+        `${EVENTS[eventId].label} draft (entry ${draft.id}) carries no list of teams — the whole draft is ignored. Re-enter it.`,
+        { event: eventId, entryId: draft.id });
+    } else if (usable.length !== declared.length) {
+      addIssue('error', 'bad-draft-entry',
+        `${EVENTS[eventId].label} draft (entry ${draft.id}): ${declared.length - usable.length} of ${declared.length} teams have no member list and are ignored. Re-enter the draft.`,
+        { event: eventId, entryId: draft.id });
+    }
+    teamsByEvent[eventId] = usable;
   }
   validateDrafts(teamsByEvent, addIssue);
 
@@ -491,6 +520,11 @@ export function score(effective, options = {}) {
     const candidates = effective.filter((e) => e.type === 'tyler_pick' && e.stage === stageDef.stage);
     // Spec §6.1: picks lock before their event. A pick entered after that stage's
     // event_final is rejected — recorded in the log, but never scored.
+    //
+    // `event_final` is the boundary on purpose (Brad, 2026-08-13). The spec's wording is
+    // "before its event begins", but the log has no signal for an event beginning — the only
+    // proxy would be its first result, and rejecting a pick Brad typed a beat after the first
+    // heat would cost Tyler the points with no repair short of voiding results mid-event.
     const valid = candidates.filter((e) => !finalEntry || e.id < finalEntry.id);
     const rejected = candidates.filter((e) => finalEntry && e.id >= finalEntry.id);
     for (const entry of rejected) {
@@ -502,6 +536,12 @@ export function score(effective, options = {}) {
   }
 
   const burns = buildBurns({ drafts: teamsByEvent, picks, teamsByEvent });
+  for (const slot of burns.slots) {
+    if (!slot.unresolvedTarget) continue;
+    addIssue('warn', 'pick-target-unknown',
+      `${GM}'s ${EVENTS[slot.stage].label} pick names ${slot.unresolvedTarget}, which is not in that draft — enter the draft and the pick resolves itself.`,
+      { stage: slot.stage, target: slot.unresolvedTarget });
+  }
   for (const dup of burns.duplicates) {
     addIssue('error', 'duplicate-burn',
       `${dup.player} is already burned (${EVENTS[dup.duplicateOf]?.label ?? dup.duplicateOf}) — spec §6.1 requires all 5 burns to be unique.`,
@@ -598,10 +638,24 @@ function validateDrafts(teamsByEvent, addIssue) {
   }
 }
 
+/**
+ * An override states a finishing order outright, so a malformed one has nothing to state. Both
+ * event scorers walk `placements` without checking, and a stray override missing that list would
+ * throw — permanently, since the log is append-only. Treated as absent instead: the event scores
+ * normally if it can and renders pending if it cannot, with the bad entry named.
+ */
+function usableOverride(override, eventId, addIssue) {
+  if (!override || Array.isArray(override.placements)) return override ?? null;
+  addIssue('error', 'bad-override',
+    `${EVENTS[eventId].label} override (entry ${override.id}) has no placements list — it is ignored and the event scores normally. Re-enter it.`,
+    { event: eventId, entryId: override.id });
+  return null;
+}
+
 function scoreIndividualEvent(eventId, { latest, effective, knob, addIssue }) {
   const config = EVENTS[eventId];
   const finalized = latest.has(`event_final:${eventId}`);
-  const override = latest.get(`override:${eventId}`);
+  const override = usableOverride(latest.get(`override:${eventId}`), eventId, addIssue);
 
   const values = {};
   for (const player of config.participants) {
@@ -666,7 +720,7 @@ function scoreIndividualEvent(eventId, { latest, effective, knob, addIssue }) {
 function scoreTeamEvent(eventId, { latest, effective, teams, addIssue }) {
   const config = EVENTS[eventId];
   const finalized = latest.has(`event_final:${eventId}`);
-  const override = latest.get(`override:${eventId}`);
+  const override = usableOverride(latest.get(`override:${eventId}`), eventId, addIssue);
 
   const base = {
     id: eventId, label: config.label, short: config.short, order: config.order,
@@ -687,6 +741,13 @@ function scoreTeamEvent(eventId, { latest, effective, teams, addIssue }) {
     : eventId === 'beerball'
       ? beerballDetail(effective, teams)
       : volleyballDetail(effective, teams);
+
+  for (const match of detail.matches ?? []) {
+    if (!match.extraSets) continue;
+    addIssue('warn', 'too-many-sets',
+      `${config.label} match ${match.matchSlot} has ${match.sets.length} sets logged; it is best of ${config.maxSets}. Check the set numbers.`,
+      { event: eventId, matchSlot: match.matchSlot });
+  }
 
   const complete = detail.complete || Boolean(override);
   const status = finalized ? 'final' : complete ? 'unfinalized' : 'pending';
@@ -900,33 +961,42 @@ function resolveChampionship(players, latest, addIssue) {
     return { player: leaders[0].player, resolvedBy: 'total', contenders: leaders.map((l) => l.player) };
   }
 
-  // Tie on total → lowest average individual placement.
-  const withPlacement = leaders.filter((l) => Number.isFinite(l.avgIndividualPlacement));
-  if (withPlacement.length) {
-    const best = Math.min(...withPlacement.map((l) => l.avgIndividualPlacement));
-    const stillTied = withPlacement.filter((l) => l.avgIndividualPlacement === best);
+  // Tie on total → lowest average placement across THE THREE individual events.
+  //
+  // All three, from every tied leader, or the rule does not apply (Brad, 2026-08-13). An average
+  // over two events is simply not the same quantity as an average over three, so a leader missing
+  // one — Tyler, when he never picked for the Gauntlet — can neither win nor lose the title on the
+  // comparison. The chain skips straight to beer pong, which is a thing Brad can actually hold.
+  let contenders = leaders;
+  const comparable = leaders.every((l) => l.individualPlacements === INDIVIDUAL_EVENTS.length);
+  if (comparable) {
+    const best = Math.min(...leaders.map((l) => l.avgIndividualPlacement));
+    const stillTied = leaders.filter((l) => l.avgIndividualPlacement === best);
     if (stillTied.length === 1) {
       return {
         player: stillTied[0].player, resolvedBy: 'avgIndividualPlacement',
         contenders: leaders.map((l) => l.player),
       };
     }
-
-    // Still tied → head-to-head beer pong (spec §7).
-    const tiebreak = latest.get('championship_tiebreak');
-    if (tiebreak && stillTied.some((l) => l.player === tiebreak.winner)) {
-      return {
-        player: tiebreak.winner, resolvedBy: 'championship_tiebreak',
-        contenders: stillTied.map((l) => l.player),
-      };
-    }
-    addIssue('warn', 'championship-tie',
-      `${stillTied.map((l) => l.player).join(' and ')} are tied on total AND average individual placement — spec §7 calls for head-to-head beer pong.`,
-      { players: stillTied.map((l) => l.player) });
-    return { player: null, resolvedBy: null, contenders: stillTied.map((l) => l.player) };
+    contenders = stillTied;
   }
 
-  return { player: null, resolvedBy: null, contenders: leaders.map((l) => l.player) };
+  // Still tied → head-to-head beer pong (spec §7).
+  const tiebreak = latest.get('championship_tiebreak');
+  if (tiebreak && contenders.some((l) => l.player === tiebreak.winner)) {
+    return {
+      player: tiebreak.winner, resolvedBy: 'championship_tiebreak',
+      contenders: contenders.map((l) => l.player),
+    };
+  }
+  // Only worth saying once there is individual-event data to be tied on: early Friday every
+  // player sits at 0 and is "tied", and nagging about beer pong then is noise on the TV.
+  if (contenders.some((l) => l.individualPlacements > 0)) {
+    addIssue('warn', 'championship-tie',
+      `${contenders.map((l) => l.player).join(' and ')} are tied on total, with average individual placement unable to separate them — spec §7 calls for head-to-head beer pong.`,
+      { players: contenders.map((l) => l.player) });
+  }
+  return { player: null, resolvedBy: null, contenders: contenders.map((l) => l.player) };
 }
 
 // ---------------------------------------------------------------------------------------

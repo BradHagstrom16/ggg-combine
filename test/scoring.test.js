@@ -12,7 +12,7 @@ import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { score, effectiveLog, resolveGroup, rankIndividual, entryKey } from '../src/scoring.js';
-import { clampKnob, round1, rawPointsForRank, KNOB, ABLE } from '../src/rules-config.js';
+import { clampKnob, round1, rawPointsForRank, KNOB, ABLE, ROSTER } from '../src/rules-config.js';
 import { buildLog, append, row, totals, codes } from './helpers.js';
 import {
   GOLDEN_LOG, EXPECTED, WIFFLE_TEAMS, BEERBALL_PAIRS, VOLLEYBALL_TEAMS,
@@ -249,7 +249,7 @@ describe('individual scoring', () => {
 
   test('MULTIPLE blanks all get 0 — not the average of the trailing positions', () => {
     // Spec §3.2 is explicit: "if multiple blanks, they all get 0". Averaging 9th and 10th
-    // would hand each of them 5.6 points they did not earn.
+    // would hand each of them 6.1 points they did not earn (110/9 and 0, halved, at knob 1.1).
     const log = buildLog([
       ...ABLE.slice(0, 8).map((player, i) => ({ type: 'time', event: 'swim', player, value: 50 + i })),
       { type: 'event_final', event: 'swim' },
@@ -270,7 +270,7 @@ describe('individual scoring', () => {
   });
 
   test('n is the configured participant count, not the number of results in hand', () => {
-    // Bags has 11 participants; the spacing must stay 10 points per rank.
+    // Bags has 11 participants, so the raw spacing is 10 per rank — 11 at the default knob.
     const result = run(GOLDEN_LOG);
     assert.equal(round1(result.events.bags.points.Stu - result.events.bags.points.Wyatt), 11);
   });
@@ -367,7 +367,7 @@ describe('latest-wins per logical key', () => {
     assert.deepEqual(result.events.beerball.placements.map((p) => p.id), ['P1', 'P3', 'P2', 'P4', 'P5']);
   });
 
-  test('re-entering the knob, a draft, a pick, and an override all take the latest', () => {
+  test('a re-entered knob wins outright; a re-entered pick still answers to its lock', () => {
     const log = append(GOLDEN_LOG, [
       { type: 'knob', value: 1.5 },
       { type: 'tyler_pick', stage: 'gauntlet', target: 'Josh' },
@@ -377,6 +377,33 @@ describe('latest-wins per logical key', () => {
     const result = run(log);
     assert.equal(result.knob, 1.5);
     assert.equal(result.events.swim.points.Lucas, rawPointsForRank(1, 10) * 1.5);
+  });
+
+  test('re-entering a draft or an override takes the latest of each', () => {
+    // Both keys are (event), so the last statement of each is the one that scores — no
+    // correction needed. Here Brad re-drafts volleyball (Brad moves to Team Helwig) and
+    // records the chug-off result twice, the second time correctly.
+    const redrafted = VOLLEYBALL_TEAMS.map((t) => (
+      t.id === 'TM' ? { ...t, members: ['Mitch', 'Stu', 'Josh'] }
+        : t.id === 'TH' ? { ...t, members: ['Helwig', 'Yuyi', 'ATM', 'Brad'] }
+          : t
+    ));
+    const log = append(GOLDEN_LOG, [
+      { type: 'draft_assignment', event: 'volleyball', teams: redrafted },
+      { type: 'override', event: 'beerball', placements: ['P5', 'P4', 'P3', 'P2', 'P1'], reason: 'chug-off' },
+      { type: 'override', event: 'beerball', placements: ['P4', 'P5', 'P3', 'P2', 'P1'], reason: 'chug-off, recorded right' },
+    ]);
+    const result = run(log);
+
+    // Team Mitch still finished 2nd for 50 — but Brad is on last-place Team Helwig now.
+    assert.equal(result.events.volleyball.points.Mitch, 50);
+    assert.equal(result.events.volleyball.points.Brad, 0);
+    assert.equal(codes(result).includes('bad-team-sizes'), false, '4/3/3 is still 4/3/3');
+
+    // The second override is the whole truth: the first is not blended into it.
+    assert.equal(result.events.beerball.teamPoints.P4, 100);
+    assert.equal(result.events.beerball.teamPoints.P5, 75);
+    assert.equal(result.events.beerball.overrideReason, 'chug-off, recorded right');
   });
 
   test('only the LAST volleyball set for a slot counts', () => {
@@ -606,10 +633,12 @@ describe('group-wise tie resolution', () => {
   });
 
   test('head-to-head separates a 2-way tie without needing a chug-off', () => {
-    // P1 and P2 both at 3 wins and equal beer diff, but P1 beat P2 head to head.
+    // Rewriting games 2 and 3 leaves P2 and P3 level on wins, with P3 holding the head-to-head
+    // (it took game 2). The wins come from the hand-set ctx below, and `headToHeadWins` reads
+    // nothing but pairs and winner — no beer counts are involved in this one.
     const games = CIRCULAR_GAMES.map((g) => (
-      g.gameSlot === 2 ? { ...g, winner: 'P3', beers: { P3: 4, P2: 2 } } // P2 loses to P3
-        : g.gameSlot === 3 ? { ...g, winner: 'P1', beers: { P1: 4, P3: 2 } } // P1 beats P3
+      g.gameSlot === 2 ? { ...g, winner: 'P3' } // P2 loses to P3
+        : g.gameSlot === 3 ? { ...g, winner: 'P1' } // P1 beats P3
           : g
     ));
     const ctx = {
@@ -678,7 +707,8 @@ describe('volleyball best-of-3', () => {
     // TW: (21−19) + (17−21) + (15−11) + (21−12) + (21−19) = 2 − 4 + 4 + 9 + 2 = 13
     assert.equal(result.events.volleyball.ctx.stats.TW.pointDiff, 13);
     // The three must cancel out — every point is somebody's gain and somebody's loss.
-    assert.equal(7 + -20 + 13, 0);
+    const { TM, TH, TW } = result.events.volleyball.ctx.stats;
+    assert.equal(TM.pointDiff + TH.pointDiff + TW.pointDiff, 0);
   });
 
   test('total points is the sum of a team\'s own scores across every set', () => {
@@ -695,8 +725,7 @@ describe('volleyball best-of-3', () => {
     assert.equal(result2.events.volleyball.status, 'pending');
   });
 
-  test('point differential breaks a tie on wins', () => {
-    // Make match 2 a TM win so TM and TW both sit at 2 wins... but TH must then lose both.
+  test('a 2/1/0 spread is decided on wins alone, before any tiebreaker runs', () => {
     const sets = [
       { matchSlot: 1, setNo: 1, scores: { TM: 21, TH: 5 } },
       { matchSlot: 1, setNo: 2, scores: { TM: 21, TH: 5 } },
@@ -714,6 +743,78 @@ describe('volleyball best-of-3', () => {
     // TW 2 wins, TM 1, TH 0 — decided on wins alone, no tie needed.
     assert.deepEqual(result2.events.volleyball.placements.map((p) => p.id), ['TW', 'TM', 'TH']);
     assert.equal(result2.events.volleyball.manualRequired, false);
+  });
+
+  test('point differential breaks a circular tie on wins (spec §4.5)', () => {
+    // Each team wins exactly one match, so `wins` separates nobody and the second rule decides.
+    //   M1  TM 21-10, 21-10 TH   → TM +22, TH −22
+    //   M2  TW 21-5,  21-5  TM   → TW +32, TM −32
+    //   M3  TH 21-19, TW 21-19, TH 21-19  → TH +2, TW −2
+    // Differentials: TW +30, TM −10, TH −20 (which sum to 0, as they must).
+    const sets = [
+      { matchSlot: 1, setNo: 1, scores: { TM: 21, TH: 10 } },
+      { matchSlot: 1, setNo: 2, scores: { TM: 21, TH: 10 } },
+      { matchSlot: 2, setNo: 1, scores: { TM: 5, TW: 21 } },
+      { matchSlot: 2, setNo: 2, scores: { TM: 5, TW: 21 } },
+      { matchSlot: 3, setNo: 1, scores: { TH: 21, TW: 19 } },
+      { matchSlot: 3, setNo: 2, scores: { TH: 19, TW: 21 } },
+      { matchSlot: 3, setNo: 3, scores: { TH: 21, TW: 19 } },
+    ];
+    const log = buildLog([
+      { type: 'draft_assignment', event: 'volleyball', teams: VOLLEYBALL_TEAMS },
+      ...sets.map((s) => ({ type: 'volleyball_set', event: 'volleyball', ...s })),
+      { type: 'event_final', event: 'volleyball' },
+    ]);
+    const result2 = run(log);
+    const stats = result2.events.volleyball.ctx.stats;
+
+    // Precondition: the knot is real — one win each.
+    assert.deepEqual([stats.TM.wins, stats.TH.wins, stats.TW.wins], [1, 1, 1]);
+    assert.deepEqual([stats.TW.pointDiff, stats.TM.pointDiff, stats.TH.pointDiff], [30, -10, -20]);
+
+    assert.deepEqual(result2.events.volleyball.placements.map((p) => p.id), ['TW', 'TM', 'TH']);
+    assert.equal(result2.events.volleyball.manualRequired, false, 'point differential settles it');
+    assert.equal(result2.events.volleyball.teamPoints.TW, 100);
+    assert.equal(result2.events.volleyball.teamPoints.TH, 0);
+  });
+
+  test('a 2–2 match has no winner: the extra set is flagged, not silently decisive', () => {
+    // A fourth set means a mis-numbered entry. Both teams clear `setsToWin`, and picking the
+    // one whose set happened to land first would invent a match result out of key order.
+    const log = buildLog([
+      { type: 'draft_assignment', event: 'volleyball', teams: VOLLEYBALL_TEAMS },
+      { type: 'volleyball_set', event: 'volleyball', matchSlot: 1, setNo: 1, scores: { TM: 21, TH: 10 } },
+      { type: 'volleyball_set', event: 'volleyball', matchSlot: 1, setNo: 2, scores: { TM: 10, TH: 21 } },
+      { type: 'volleyball_set', event: 'volleyball', matchSlot: 1, setNo: 3, scores: { TM: 21, TH: 10 } },
+      { type: 'volleyball_set', event: 'volleyball', matchSlot: 1, setNo: 4, scores: { TM: 10, TH: 21 } },
+    ]);
+    const result2 = run(log);
+    const match = result2.events.volleyball.matches[0];
+
+    assert.deepEqual(match.setWins, { TM: 2, TH: 2 });
+    assert.equal(match.winner, null, 'nobody took the match');
+    assert.equal(match.extraSets, true);
+    assert.equal(result2.events.volleyball.status, 'pending');
+    const issue = result2.issues.find((i) => i.code === 'too-many-sets');
+    assert.ok(issue, 'the fourth set must surface');
+    assert.equal(issue.level, 'warn');
+    // Every set played still counts toward the differential (Brad, 2026-08-13): +11 −11 +11 −11.
+    assert.equal(result2.events.volleyball.ctx.stats.TM.pointDiff, 0);
+  });
+
+  test('a 3–1 match still resolves, and still flags the extra set', () => {
+    const log = buildLog([
+      { type: 'draft_assignment', event: 'volleyball', teams: VOLLEYBALL_TEAMS },
+      { type: 'volleyball_set', event: 'volleyball', matchSlot: 1, setNo: 1, scores: { TM: 21, TH: 10 } },
+      { type: 'volleyball_set', event: 'volleyball', matchSlot: 1, setNo: 2, scores: { TM: 10, TH: 21 } },
+      { type: 'volleyball_set', event: 'volleyball', matchSlot: 1, setNo: 3, scores: { TM: 21, TH: 10 } },
+      { type: 'volleyball_set', event: 'volleyball', matchSlot: 1, setNo: 4, scores: { TM: 21, TH: 10 } },
+    ]);
+    const result2 = run(log);
+    const match = result2.events.volleyball.matches[0];
+    assert.equal(match.winner, 'TM');
+    assert.equal(match.extraSets, true);
+    assert.ok(codes(result2).includes('too-many-sets'));
   });
 });
 
@@ -737,11 +838,8 @@ describe("Tyler's burn ledger", () => {
   test('a volleyball pool can narrow to exactly one eligible team', () => {
     // Burn Wyatt via the Beer Ball pair and Helwig via the Swim pick: of the three volleyball
     // captains (Mitch, Helwig, Wyatt) only Mitch survives, so only Team Mitch may be picked.
-    const pairs = BEERBALL_PAIRS.map((p) => (
-      p.id === 'P5' ? { ...p, members: ['Brad', 'Wyatt'] } : p
-    ));
     const log = buildLog([
-      { type: 'draft_assignment', event: 'beerball', teams: pairs },
+      { type: 'draft_assignment', event: 'beerball', teams: BEERBALL_PAIRS },
       { type: 'draft_assignment', event: 'volleyball', teams: VOLLEYBALL_TEAMS },
       { type: 'tyler_pick', stage: 'swim', target: 'Helwig' },
     ]);
@@ -756,6 +854,30 @@ describe("Tyler's burn ledger", () => {
     assert.deepEqual(result.burns.slots.map((s) => s.player), ['Brad', 'Wyatt', 'Lucas', 'Mitch', 'Stu']);
     // Stu is on the picked team AND is later burned by the Gauntlet pick, which is legal.
     assert.equal(result.burns.duplicates.length, 0);
+  });
+
+  test('a team pick made before its draft stays unresolved instead of burning nobody', () => {
+    // Brad types Tyler's volleyball pick before entering the volleyball draft. `TM` means
+    // nothing yet, so the slot must wait — burning `null` would put a hole in the burn list
+    // and cost the slot the eligible pool the admin screen shows.
+    const log = buildLog([
+      { type: 'draft_assignment', event: 'beerball', teams: BEERBALL_PAIRS },
+      { type: 'tyler_pick', stage: 'volleyball', target: 'TM' },
+    ]);
+    const result = run(log);
+    const slot = result.burns.slots.find((s) => s.stage === 'volleyball');
+
+    assert.equal(result.burns.burned.includes(null), false, 'nobody is burned by an unknown team');
+    assert.equal(slot.player, null);
+    assert.equal(slot.unresolvedTarget, 'TM');
+    assert.ok(Array.isArray(slot.eligible), 'the slot keeps its eligible pool');
+    assert.ok(codes(result).includes('pick-target-unknown'));
+
+    // It heals itself the moment the draft lands — no correction needed.
+    const drafted = append(log, [{ type: 'draft_assignment', event: 'volleyball', teams: VOLLEYBALL_TEAMS }]);
+    const healed = run(drafted);
+    assert.equal(healed.burns.slots.find((s) => s.stage === 'volleyball').player, 'Mitch');
+    assert.equal(codes(healed).includes('pick-target-unknown'), false);
   });
 
   test('correcting a pick before the event recomputes the pool', () => {
@@ -922,17 +1044,21 @@ describe('override supremacy and flag propagation', () => {
 
 describe('championship tiebreak chain (spec §7)', () => {
   /**
-   * A perfect reversal: whoever is rank r in the Swim is rank 11−r in the Gauntlet. Every
-   * able player therefore totals exactly 110 in real arithmetic — and exactly 5.5 average
-   * individual placement — so the §7 chain has to run all the way to beer pong.
+   * A perfect reversal: whoever is rank r in the Swim is rank 11−r in the Gauntlet, and Bags is
+   * a dead heat where all 11 throw the same score (so everyone shares the whole ladder: 55
+   * points, placement 6). Every able player therefore totals exactly 165 in real arithmetic —
+   * and exactly 17/3 average placement, over all three individual events — so the §7 chain has
+   * to run the whole way to beer pong.
    */
   const reversal = (() => {
     const swim = ABLE.map((player, i) => ({ type: 'time', event: 'swim', player, value: 50 + i }));
+    const bags = ROSTER.map((player) => ({ type: 'time', event: 'bags', player, value: 12 }));
     const gauntlet = [...ABLE].reverse().map((player, i) => (
       { type: 'time', event: 'gauntlet', player, value: 50 + i }
     ));
     return buildLog([
       ...swim, { type: 'event_final', event: 'swim' },
+      ...bags, { type: 'event_final', event: 'bags' },
       ...gauntlet, { type: 'event_final', event: 'gauntlet' },
     ]);
   })();
@@ -945,7 +1071,7 @@ describe('championship tiebreak chain (spec §7)', () => {
     assert.ok(raw.size > 1, 'precondition: the raw float totals are NOT all identical');
 
     const rounded = new Set(able.map((p) => p.totalRounded));
-    assert.deepEqual([...rounded], [110], 'but at 1 decimal every one of them is 110.0');
+    assert.deepEqual([...rounded], [165], 'but at 1 decimal every one of them is 165.0');
 
     for (const player of able) assert.equal(player.rankLabel, 'T1');
   });
@@ -953,7 +1079,11 @@ describe('championship tiebreak chain (spec §7)', () => {
   test('with totals AND average placement tied, §7 calls for beer pong', () => {
     const result = run(reversal);
     const able = result.players.filter((p) => p.player !== 'Tyler');
-    for (const player of able) assert.equal(player.avgIndividualPlacement, 5.5);
+    // (swim r + bags 6 + gauntlet 11−r) / 3 = 17/3, for every one of them.
+    for (const player of able) {
+      assert.equal(player.avgIndividualPlacement, 17 / 3);
+      assert.equal(player.individualPlacements, 3, 'all three placements are in hand');
+    }
 
     assert.equal(result.championship.player, null, 'no champion may be invented');
     assert.equal(result.championship.contenders.length, 10);
@@ -974,15 +1104,19 @@ describe('championship tiebreak chain (spec §7)', () => {
   });
 
   /**
-   * Middle link: two players tie at exactly 110.0 but on different routes.
-   *   X — Swim 1st (110) + Bags 11th (0)   → placements (1 + 11)/2 = 6.0
-   *   Y — Swim 10th (0)  + Bags 1st (110)  → placements (10 + 1)/2 = 5.5   ← lower wins
-   * Everyone else is paired to land strictly below 110.
+   * Middle link: two players tie at exactly 213.9 but on different routes.
+   *   X — Swim 1st (110) + Bags 11th (0)  + Gauntlet T1st (103.89) → placements (1 + 11 + 1.5)/3 = 4.5
+   *   Y — Swim 10th (0)  + Bags 1st (110) + Gauntlet T1st (103.89) → placements (10 + 1 + 1.5)/3 ≈ 4.17  ← lower wins
+   *
+   * The Gauntlet dead heat is what keeps them level while handing both of them a complete set
+   * of three individual placements, which §7's average-placement step requires. Everyone else
+   * is paired to land far below: the best of them is Murph at 108.78 + 85.56 = 194.3.
    */
   test('a tie on total is broken by the lowest average individual placement', () => {
     const swimOrder = ['Stu', 'Murph', 'Josh', 'Lucas', 'Mitch', 'Yuyi', 'ATM', 'Helwig', 'Brad', 'Wyatt'];
     //  X = Stu (swim 1st, bags 11th) · Y = Wyatt (swim 10th, bags 1st)
     const bagsOrder = ['Wyatt', 'Tyler', 'Brad', 'Helwig', 'ATM', 'Yuyi', 'Mitch', 'Lucas', 'Josh', 'Murph', 'Stu'];
+    const gauntletOrder = ['Murph', 'Josh', 'Lucas', 'Mitch', 'Yuyi', 'ATM', 'Helwig', 'Brad'];
 
     const log = buildLog([
       ...swimOrder.map((player, i) => ({ type: 'time', event: 'swim', player, value: 50 + i })),
@@ -990,19 +1124,56 @@ describe('championship tiebreak chain (spec §7)', () => {
       { type: 'event_final', event: 'swim' },
       ...bagsOrder.map((player, i) => ({ type: 'time', event: 'bags', player, value: 100 - i })),
       { type: 'event_final', event: 'bags' },
+      // Stu and Wyatt dead-heat the Gauntlet and split 1st/2nd; the other eight finish behind.
+      { type: 'time', event: 'gauntlet', player: 'Stu', value: 40 },
+      { type: 'time', event: 'gauntlet', player: 'Wyatt', value: 40 },
+      ...gauntletOrder.map((player, i) => ({ type: 'time', event: 'gauntlet', player, value: 50 + i })),
+      { type: 'event_final', event: 'gauntlet' },
     ]);
     const result = run(log);
 
-    assert.equal(row(result, 'Stu').totalRounded, 110);
-    assert.equal(row(result, 'Wyatt').totalRounded, 110);
-    assert.equal(row(result, 'Stu').avgIndividualPlacement, 6);
-    assert.equal(row(result, 'Wyatt').avgIndividualPlacement, 5.5);
-    // Nobody else reaches 110.
+    assert.equal(row(result, 'Stu').totalRounded, 213.9);
+    assert.equal(row(result, 'Wyatt').totalRounded, 213.9);
+    assert.equal(row(result, 'Stu').avgIndividualPlacement, 13.5 / 3);
+    assert.equal(row(result, 'Wyatt').avgIndividualPlacement, 12.5 / 3);
+    // Nobody else comes close.
     const others = result.players.filter((p) => !['Stu', 'Wyatt'].includes(p.player));
-    for (const player of others) assert.ok(player.totalRounded < 110, `${player.player} < 110`);
+    for (const player of others) assert.ok(player.totalRounded < 213.9, `${player.player} < 213.9`);
 
     assert.equal(result.championship.player, 'Wyatt');
     assert.equal(result.championship.resolvedBy, 'avgIndividualPlacement');
+  });
+
+  test('an incomplete placement set never decides the title — §7 goes to beer pong instead', () => {
+    // Same tie, but Tyler is in it with only two of the three placements: he plays Bags, backs
+    // Wyatt in the Swim, and never picked for the Gauntlet. A 2-event average is not the same
+    // quantity as a 3-event one, so it cannot be what crowns or dethrones anybody.
+    const swimOrder = ['Stu', 'Murph', 'Josh', 'Lucas', 'Mitch', 'Yuyi', 'ATM', 'Helwig', 'Brad', 'Wyatt'];
+    const log = buildLog([
+      ...swimOrder.map((player, i) => ({ type: 'time', event: 'swim', player, value: 50 + i })),
+      { type: 'tyler_pick', stage: 'swim', target: 'Stu' }, // Tyler rides the winner: 110
+      { type: 'event_final', event: 'swim' },
+      ...ROSTER.map((player) => ({ type: 'time', event: 'bags', player, value: 12 })), // dead heat: 55 each
+      { type: 'event_final', event: 'bags' },
+      { type: 'event_final', event: 'gauntlet' }, // finalized with no times at all: 0 for everyone
+    ]);
+    const result = run(log);
+
+    // Stu and Tyler both hold 110 + 55; Tyler has 2 placements to Stu's 3.
+    assert.equal(row(result, 'Stu').totalRounded, 165);
+    assert.equal(row(result, 'Tyler').totalRounded, 165);
+    assert.equal(row(result, 'Stu').individualPlacements, 3);
+    assert.equal(row(result, 'Tyler').individualPlacements, 2);
+
+    assert.notEqual(result.championship.resolvedBy, 'avgIndividualPlacement');
+    assert.equal(result.championship.player, null, 'no champion may be invented');
+    assert.deepEqual([...result.championship.contenders].sort(), ['Stu', 'Tyler']);
+    assert.ok(codes(result).includes('championship-tie'));
+
+    // And beer pong still settles it.
+    const crowned = run(append(log, [{ type: 'championship_tiebreak', winner: 'Tyler' }]));
+    assert.equal(crowned.championship.player, 'Tyler');
+    assert.equal(crowned.championship.resolvedBy, 'championship_tiebreak');
   });
 
   test("Tyler's Swim/Gauntlet placements are his picked players', his Bags placement his own", () => {
@@ -1080,6 +1251,77 @@ describe('replay', () => {
     assert.equal(result.players.length, 11);
     for (const player of result.players) assert.equal(player.total, 0);
     assert.deepEqual(result.issues.filter((i) => i.level === 'error'), []);
+  });
+});
+
+// =======================================================================================
+// Malformed entries must never take the board down
+// =======================================================================================
+
+/**
+ * The worker checks that an entry carries a KNOWN TYPE and nothing deeper, and the log is
+ * permanent. An entry that threw in here would take the standings, the TV and the admin page
+ * down for the rest of the weekend, with no way to get it back out. Every shape below has to
+ * degrade into a visible issue instead.
+ */
+describe('malformed entries fail soft', () => {
+  test('an override with no placements list is ignored, and the event scores normally', () => {
+    const log = append(GOLDEN_LOG, [{ type: 'override', event: 'swim', reason: 'fat-fingered' }]);
+    const result = run(log);
+    assert.deepEqual(totals(result), EXPECTED.totals, 'the computed weekend is untouched');
+    assert.equal(result.events.swim.overridden, false);
+    const issue = result.issues.find((i) => i.code === 'bad-override');
+    assert.ok(issue, 'and Brad is told to re-enter it');
+    assert.equal(issue.level, 'error');
+  });
+
+  test('a malformed override cannot make an incomplete team event scoreable', () => {
+    const log = buildLog([
+      { type: 'draft_assignment', event: 'beerball', teams: BEERBALL_PAIRS },
+      { type: 'override', event: 'beerball', placements: 'P1 then the rest', reason: 'wrong box' },
+    ]);
+    const result = run(log);
+    assert.equal(result.events.beerball.status, 'pending');
+    assert.deepEqual(result.events.beerball.teamPoints, {});
+    assert.ok(codes(result).includes('bad-override'));
+  });
+
+  test('a draft with one malformed team drops that team and scores the rest', () => {
+    const teams = [
+      { id: 'A', captain: 'Murph', members: ['Murph', 'Lucas', 'Yuyi', 'Helwig', 'Wyatt', 'Tyler'] },
+      { id: 'B', captain: 'Stu', members: 'Stu' }, // a string iterates into 3 "players" named S, t, u
+    ];
+    const log = buildLog([
+      { type: 'draft_assignment', event: 'wiffle', teams },
+      { type: 'wiffle_result', event: 'wiffle', winner: 'A' },
+      { type: 'event_final', event: 'wiffle' },
+    ]);
+    const result = run(log);
+    assert.equal(result.events.wiffle.teams.length, 1);
+    assert.equal(result.events.wiffle.points.Murph, 100);
+    assert.equal(result.events.wiffle.points.S, undefined, 'no player was invented out of letters');
+    assert.ok(codes(result).includes('bad-draft-entry'));
+  });
+
+  test('a draft whose teams are not a list at all is dropped whole', () => {
+    const log = buildLog([{ type: 'draft_assignment', event: 'volleyball', teams: { TM: ['Mitch'] } }]);
+    const result = run(log);
+    assert.equal(result.events.volleyball.status, 'pending');
+    assert.ok(codes(result).includes('bad-draft-entry'));
+  });
+
+  test('a pile of junk on top of the golden weekend still renders 11 standings rows', () => {
+    const log = append(GOLDEN_LOG, [
+      { type: 'override', event: 'bags', reason: 'no placements' },
+      { type: 'draft_assignment', event: 'volleyball', teams: 'the usual three' },
+      { type: 'volleyball_set', event: 'volleyball', matchSlot: 1, setNo: 1 }, // no scores
+      { type: 'time', event: 'swim', player: 'Lucas' }, // no value
+    ]);
+    const result = run(log);
+    assert.equal(result.players.length, 11);
+    for (const player of result.players) assert.ok(Number.isFinite(player.total));
+    assert.ok(codes(result).includes('bad-override'));
+    assert.ok(codes(result).includes('bad-draft-entry'));
   });
 });
 

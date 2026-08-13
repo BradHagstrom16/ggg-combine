@@ -113,12 +113,21 @@ visible, audited fixes. Nothing is ever mutated or deleted.
 
 - **Compare and display totals at 1 decimal.** Float dust must never silently defeat the §7
   tie detection — a tie for the championship is a *feature*, not a rounding artifact.
+- **§7's average-placement step needs all three individual placements, from every tied leader**
+  (Brad, 2026-08-13). An average over two events is not the same quantity as one over three, so a
+  leader missing one — Tyler, when he never picked for the Gauntlet — sends the chain straight to
+  beer pong rather than being ranked against it.
 - **Round-robin ties use a group-wise resolver, not a pairwise comparator chain.** Head-to-head
   is non-transitive: a 3-way circular knot must be *detected* and flagged
   `manual-resolution-required` (Brad enters an `override`), never silently ordered.
 - **Pending ≠ zero.** A missing result *before* that event's `event_final` renders as pending
   (hatched, no points). *After* `event_final` it is 0 points — a warning chip, **not an error**
   (spec §3.2 / §10.6).
+- **`score()` must never throw.** The log is permanent and every view re-derives from it, so one
+  malformed entry that threw would black out standings, TV and admin for the rest of the weekend
+  with no way to remove it. Malformed payloads degrade to an issue instead (`bad-draft-entry`,
+  `bad-override`) and the board keeps scoring. Any new field a scorer walks needs the same
+  treatment at the point it enters.
 - **Golf is an exhibition.** It may appear on the agenda; it must never touch standings.
 - **Display names exactly as written** in spec §2: `Stu, Murph, Tyler, Josh, Lucas, Mitch,
   Yuyi, ATM, Helwig, Brad, Wyatt`.
