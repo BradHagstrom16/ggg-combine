@@ -32,7 +32,14 @@ no preflights, no second host. Storage is an **append-only log** in one SQLite-b
 Object. Because the log is append-only, standings at any moment are `score(effectiveLog.slice(0, i))`
 — which is where weekend replay, undo, and audit all come from for free.
 
-```
+Note the order in that expression: corrections are applied to the **whole** log first, and the
+*effective* log is what gets sliced. That is deliberate. Replay is a Saturday-night broadcast
+projected before the fantasy draft, and it should show the weekend as it actually happened —
+not re-stage a time Brad fat-fingered at 4pm and fixed at 4:01. If you ever want the other
+semantics (each prefix resolved independently, so replay reproduces what was on screen at the
+time), that is a *different* feature and needs its own function; don't quietly change this one.
+
+```text
 admin.html ──POST /log (PIN, entry+UUID)──▶ Worker ──▶ Durable Object (SQLite)
     │  ▲                                     │           append, assign id,
     │  └── offline outbox (queue+flush)      │           drop dup UUIDs
