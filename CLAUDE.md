@@ -18,12 +18,22 @@ on a phone, and the standings are projected on a TV.
 ## Commands
 
 ```bash
-npm test                   # node:test — scoring engine + worker
-npm run test:scoring       # scoring engine only (fast, no wrangler)
+npm test                   # node:test — scoring engine + worker (~9s; boots real workerd)
+npm run test:scoring       # scoring engine only (~80ms, no wrangler)
+npm run test:worker        # worker + Durable Object only
 npx wrangler dev           # local worker + DO + static assets on :8787
 npx wrangler deploy        # ship everything (site + API) to Cloudflare
 npx wrangler secret put ADMIN_PIN   # set/rotate the commissioner PIN
 ```
+
+For `wrangler dev`, put the PIN in a **`.dev.vars`** file (gitignored) so local writes work:
+
+```dotenv
+ADMIN_PIN=whatever-you-like-locally
+```
+
+The worker tests don't need it — they inject their own PIN and run against non-persistent
+storage, so every run starts from an empty log.
 
 ## Architecture
 
@@ -79,6 +89,14 @@ visible, audited fixes. Nothing is ever mutated or deleted.
 - Wrong/missing PIN → `401`, checked *before* the body is read, so the log is never touched.
 - Malformed JSON or an unknown entry type → `400`. The log is permanent; junk that gets in
   never comes out.
+- A `correction` whose `targets` names an entry that doesn't exist → `400`. Only the Durable
+  Object knows which ids exist, so that check lives in the append path, not in shape
+  validation. Because ids are assigned at insert, "the target exists" also proves "the target
+  is older" — you cannot correct the future, and a correction cannot target itself.
+- A `replacement` payload gets **the same scrutiny as a first-class entry** (it must be an
+  object with a known `type`), minus the uuid, which it inherits from its correction. A
+  replacement may not itself be a `correction` — replacements are spliced straight into the
+  effective log and never re-processed, so a nested one would silently do nothing.
 
 ### Correction semantics
 
