@@ -452,6 +452,52 @@ describe('corrections', () => {
     assert.equal(lucas.value, 55);
   });
 
+  test('TWO corrections targeting one entry resolve deterministically to the later', () => {
+    // Brad fixes a time, then fixes his fix. Both corrections are alive and both aim at the
+    // same original entry. This must not be undefined behaviour: each surviving replacement
+    // enters at its own id, so ordinary latest-wins picks the highest.
+    const log = append(base, [
+      { type: 'correction', targets: 1, replacement: { type: 'time', event: 'swim', player: 'Lucas', value: 61 } },
+      { type: 'correction', targets: 1, replacement: { type: 'time', event: 'swim', player: 'Lucas', value: 63 } },
+    ]);
+    const effective = effectiveLog(log);
+    const lucas = effective.filter((e) => e.type === 'time' && e.player === 'Lucas');
+    assert.deepEqual(lucas.map((e) => e.value), [61, 63], 'both survive, in id order');
+
+    const result = score(effective);
+    assert.equal(result.events.swim.values.Lucas, 63, 'the later correction is what scores');
+    // The original is gone from the effective log but still in the raw log for audit.
+    assert.equal(effective.some((e) => e.value === 55), false);
+    assert.equal(log.some((e) => e.value === 55), true);
+  });
+
+  test('voiding the later of two competing corrections falls back to the earlier', () => {
+    const log = append(base, [
+      { type: 'correction', targets: 1, replacement: { type: 'time', event: 'swim', player: 'Lucas', value: 61 } },
+      { type: 'correction', targets: 1, replacement: { type: 'time', event: 'swim', player: 'Lucas', value: 63 } },
+    ]);
+    const laterId = log[log.length - 1].id;
+    const result = score(effectiveLog(append(log, [{ type: 'correction', targets: laterId }])));
+    assert.equal(result.events.swim.values.Lucas, 61);
+  });
+
+  test('a correction chain three deep terminates and resolves', () => {
+    // void → un-void → re-void. Each correction has a higher id than its target, so the
+    // descending resolution pass always terminates.
+    let log = append(base, [{ type: 'correction', targets: 1 }]);
+    for (let depth = 0; depth < 2; depth += 1) {
+      log = append(log, [{ type: 'correction', targets: log[log.length - 1].id }]);
+    }
+    const effective = effectiveLog(log);
+    // Odd number of stacked voids on the chain ⇒ the original is voided again.
+    assert.equal(effective.some((e) => e.type === 'time' && e.player === 'Lucas'), false);
+  });
+
+  test('a correction targeting an id that does not exist is inert', () => {
+    const result = score(effectiveLog(append(base, [{ type: 'correction', targets: 9999 }])));
+    assert.equal(result.events.swim.values.Lucas, 55);
+  });
+
   test('corrections are applied BEFORE any replay slice, so replay never shows a typo', () => {
     const log = append(base, [{ type: 'correction', targets: 1 }]);
     const effective = effectiveLog(log);
