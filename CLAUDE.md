@@ -68,6 +68,33 @@ Scoring resolves each **logical key** to its **latest non-voided entry**, so cas
 a value self-heals. `correction {targets: id, replacement?}` voids or replaces an entry for
 visible, audited fixes. Nothing is ever mutated or deleted.
 
+### The write contract (what `admin.html` can rely on)
+
+`POST /log` is **idempotent by UUID**, and this is load-bearing for the offline outbox:
+
+- A UUID the log has not seen → `201` with `{entry, duplicate: false}`.
+- A UUID it already holds → **`200` with `{entry: <the original>, duplicate: true}`**. This is a
+  *success*, not a conflict — the outbox must dequeue on it. A retry whose payload changed
+  still returns the original: first arrival wins, and a retry can never rewrite history.
+- Wrong/missing PIN → `401`, checked *before* the body is read, so the log is never touched.
+- Malformed JSON or an unknown entry type → `400`. The log is permanent; junk that gets in
+  never comes out.
+
+### Correction semantics
+
+- **Shape.** `{type: 'correction', uuid, targets: <entry id>, replacement?: <entry payload>}`.
+  The `replacement` is a bare entry payload — `type` plus that type's own fields, no `id`/`uuid`
+  (it inherits the correction's).
+- **Corrections may target corrections.** That is how "undo the undo" works: voiding a
+  correction brings its target back to life. Chains resolve in descending id order, which
+  terminates because a correction always has a higher id than what it targets.
+- **A replacement enters the log at the correction's `id`**, not the target's — it is a new
+  statement of fact made at the moment Brad made it, so it beats a re-entry made in between.
+- **Multiple corrections targeting one entry** is deterministic, not undefined: each surviving
+  replacement enters at its own id, and normal latest-wins picks the highest. Two competing
+  replacements therefore resolve to the later one, and the earlier remains visible in the raw
+  log for audit.
+
 | Type | Fields | Latest-wins key |
 |---|---|---|
 | `draft_assignment` | event, teams/pairs with captains | (event) |
