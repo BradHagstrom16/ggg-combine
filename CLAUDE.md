@@ -18,12 +18,22 @@ on a phone, and the standings are projected on a TV.
 ## Commands
 
 ```bash
-npm test                   # node:test — scoring engine + worker
-npm run test:scoring       # scoring engine only (fast, no wrangler)
+npm test                   # node:test — scoring engine + worker (~9s; boots real workerd)
+npm run test:scoring       # scoring engine only (~80ms, no wrangler)
+npm run test:worker        # worker + Durable Object only
 npx wrangler dev           # local worker + DO + static assets on :8787
 npx wrangler deploy        # ship everything (site + API) to Cloudflare
 npx wrangler secret put ADMIN_PIN   # set/rotate the commissioner PIN
 ```
+
+For `wrangler dev`, put the PIN in a **`.dev.vars`** file (gitignored) so local writes work:
+
+```
+ADMIN_PIN=whatever-you-like-locally
+```
+
+The worker tests don't need it — they inject their own PIN and run against non-persistent
+storage, so every run starts from an empty log.
 
 ## Architecture
 

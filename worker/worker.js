@@ -1,0 +1,217 @@
+/**
+ * GGG Combine 2026 — Worker + Durable Object.
+ *
+ *   admin.html ──POST /log (PIN, entry+UUID)──▶ Worker ──▶ Durable Object (SQLite)
+ *       │  ▲                                     │           append, assign id,
+ *       │  └── offline outbox (queue+flush)      │           drop dup UUIDs
+ *       ▼                                        │
+ *   index.html / ?tv=1 ◀──GET /log (≤10s poll,───┘  + serves /public (same origin)
+ *        │                 visible tabs, 5s edge cache)
+ *        ▼
+ *   localStorage cache ─▶ effectiveLog (corrections + latest-wins) ─▶ scoring.js ─▶ render.js
+ *
+ * This file is deliberately small and dumb. It stores raw entries and hands them back; it does
+ * not know a swim time from a knob turn. All meaning lives in `src/scoring.js`, client-side,
+ * so the log stays a permanent record of what Brad typed rather than of what some version of
+ * the rules once thought it meant.
+ *
+ * Static assets are served by the platform's asset router (see `wrangler.toml`); this Worker
+ * is only reached for `/log`, which `run_worker_first` pins to it explicitly.
+ */
+
+import { DurableObject } from 'cloudflare:workers';
+import { ENTRY_TYPES } from '../src/entry-types.js';
+
+/** One log, one Durable Object instance, forever. The name is the whole namespace. */
+const LOG_SINGLETON = 'log';
+
+const PIN_HEADER = 'x-combine-pin';
+
+/** Generous for a draft assignment (11 names), absurd for anything else. */
+const MAX_BODY_BYTES = 64 * 1024;
+
+/** Poll cadence is ≤10s and the freshness budget is 15s, so 5s of staleness is free. */
+const GET_CACHE_SECONDS = 5;
+
+// ---------------------------------------------------------------------------------------
+// The Durable Object: an append-only log in SQLite
+// ---------------------------------------------------------------------------------------
+
+export class LogDO extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.sql = ctx.storage.sql;
+
+    // AUTOINCREMENT, not a bare INTEGER PRIMARY KEY: a plain rowid alias reuses the highest
+    // id after a delete, and "ids are monotonic and never reused" is a property the client's
+    // correction targets depend on. We never delete, but the guarantee should not rest on that.
+    //
+    // UNIQUE on uuid is the UUID dedupe, enforced by the database rather than by a code path
+    // someone can forget: a double-tapped save or a retried offline flush cannot become two
+    // entries even if the append logic is wrong.
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS entries (
+        id   INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT    NOT NULL UNIQUE,
+        ts   INTEGER NOT NULL,
+        type TEXT    NOT NULL,
+        body TEXT    NOT NULL
+      )
+    `);
+  }
+
+  /** The whole log, oldest first. ~30 entries over a weekend — no pagination needed. */
+  list() {
+    return this.sql
+      .exec('SELECT id, uuid, ts, type, body FROM entries ORDER BY id')
+      .toArray()
+      .map(hydrate);
+  }
+
+  /**
+   * Append one entry, or return the existing one if this UUID has already landed.
+   *
+   * Idempotent by construction: the client stamps the UUID before the first send, so a retry
+   * carries the same one. Callers can therefore retry freely — which is exactly what the
+   * offline outbox does when the wifi comes back.
+   */
+  append(entry) {
+    const existing = this.sql
+      .exec('SELECT id, uuid, ts, type, body FROM entries WHERE uuid = ?', entry.uuid)
+      .toArray();
+    if (existing.length) return { entry: hydrate(existing[0]), duplicate: true };
+
+    const { uuid, type, ts, ...body } = entry;
+    this.sql.exec(
+      'INSERT INTO entries (uuid, ts, type, body) VALUES (?, ?, ?, ?)',
+      uuid,
+      Number.isFinite(ts) ? ts : Date.now(),
+      type,
+      JSON.stringify(body),
+    );
+
+    const row = this.sql
+      .exec('SELECT id, uuid, ts, type, body FROM entries WHERE uuid = ?', uuid)
+      .toArray()[0];
+    return { entry: hydrate(row), duplicate: false };
+  }
+}
+
+/** Rows go back out in the exact shape the client sent, plus the server-assigned id. */
+function hydrate(row) {
+  return { id: row.id, uuid: row.uuid, ts: row.ts, type: row.type, ...JSON.parse(row.body) };
+}
+
+// ---------------------------------------------------------------------------------------
+// The Worker
+// ---------------------------------------------------------------------------------------
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname !== '/log') {
+      return new Response('Not found', { status: 404 });
+    }
+
+    const stub = env.LOG.get(env.LOG.idFromName(LOG_SINGLETON));
+
+    if (request.method === 'GET') return handleGet(request, stub);
+    if (request.method === 'POST') return handlePost(request, env, stub);
+    return new Response('Method not allowed', {
+      status: 405,
+      headers: { allow: 'GET, POST' },
+    });
+  },
+};
+
+async function handleGet(request, stub) {
+  const entries = await stub.list();
+  const lastId = entries.length ? entries[entries.length - 1].id : 0;
+
+  // The log is append-only, so (count, lastId) identifies its contents exactly — no hashing
+  // needed. A poll that finds nothing new costs a 304 with an empty body.
+  const etag = `W/"${entries.length}-${lastId}"`;
+  const headers = {
+    etag,
+    'cache-control': `public, max-age=${GET_CACHE_SECONDS}`,
+  };
+
+  if (request.headers.get('if-none-match') === etag) {
+    return new Response(null, { status: 304, headers });
+  }
+  return Response.json({ entries, count: entries.length, lastId }, { headers });
+}
+
+async function handlePost(request, env, stub) {
+  // PIN first, before the body is even read: a wrong PIN must never reach the log.
+  if (!checkPin(request, env)) {
+    return problem(401, 'Wrong PIN.');
+  }
+
+  const raw = await request.text();
+  if (raw.length > MAX_BODY_BYTES) {
+    return problem(413, 'Entry too large.');
+  }
+
+  let entry;
+  try {
+    entry = JSON.parse(raw);
+  } catch {
+    return problem(400, 'Malformed JSON.');
+  }
+
+  const invalid = validate(entry);
+  if (invalid) return problem(400, invalid);
+
+  const result = await stub.append(entry);
+  return Response.json(result, {
+    status: result.duplicate ? 200 : 201,
+    headers: { 'cache-control': 'no-store' },
+  });
+}
+
+/**
+ * Reject anything that is not a well-formed entry. The log is permanent: junk that gets in
+ * never comes out, and a `time` entry misspelled as `tmie` would sit there scoring nothing
+ * while Brad wondered why the board was wrong.
+ */
+function validate(entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return 'Entry must be a JSON object.';
+  }
+  if (typeof entry.type !== 'string' || !ENTRY_TYPES.has(entry.type)) {
+    return `Unknown entry type: ${JSON.stringify(entry.type)}.`;
+  }
+  if (typeof entry.uuid !== 'string' || entry.uuid.length < 8 || entry.uuid.length > 128) {
+    return 'Entry needs a client-generated uuid (8–128 characters).';
+  }
+  if (entry.ts !== undefined && !Number.isFinite(entry.ts)) {
+    return 'Entry ts must be a number.';
+  }
+  if (entry.type === 'correction' && !Number.isInteger(entry.targets)) {
+    return 'A correction must target an entry id.';
+  }
+  return null;
+}
+
+/** Fails closed: if the secret was never set, nobody can write. */
+function checkPin(request, env) {
+  const expected = env.ADMIN_PIN;
+  if (typeof expected !== 'string' || expected.length === 0) return false;
+  return constantTimeEqual(request.headers.get(PIN_HEADER) ?? '', expected);
+}
+
+/**
+ * The threat model here is a housemate guessing the PIN, not a cryptanalyst — but comparing
+ * without early-exit costs four lines, so there is no reason to leak the answer's shape.
+ */
+function constantTimeEqual(a, b) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function problem(status, error) {
+  return Response.json({ error }, { status, headers: { 'cache-control': 'no-store' } });
+}
