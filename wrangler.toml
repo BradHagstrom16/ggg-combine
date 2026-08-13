@@ -1,0 +1,25 @@
+name = "ggg-combine"
+main = "worker/worker.js"
+compatibility_date = "2026-08-13"
+
+# Static site (/public) and the API (/log) are served from the SAME origin by this
+# one Worker. That is deliberate: no GitHub Pages, no CORS, no preflights.
+# Unmatched paths fall through from the asset router to the Worker fetch handler,
+# which is how GET/POST /log reach the Durable Object.
+[assets]
+directory = "./public"
+
+# The append-only entry log lives in ONE Durable Object instance (name: "log").
+# Durable Objects are strongly consistent, so a write is visible to the next read.
+[[durable_objects.bindings]]
+name = "LOG"
+class_name = "LogDO"
+
+# SQLite-backed Durable Objects are the free-tier-eligible kind. KV-backed are not.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["LogDO"]
+
+# ADMIN_PIN is a secret, NOT a var — set it with:
+#   npx wrangler secret put ADMIN_PIN
+# It must never appear in this file or anywhere else in git.
