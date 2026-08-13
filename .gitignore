@@ -1,0 +1,10 @@
+node_modules/
+.wrangler/
+.dev.vars
+.DS_Store
+*.log
+
+# local agent/tooling state, not part of the project
+.gstack/
+.remember/
+.claude/
