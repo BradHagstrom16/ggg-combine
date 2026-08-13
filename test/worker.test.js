@@ -174,6 +174,70 @@ describe('POST /log — validation', () => {
     const [status] = await post({ type: 'correction', uuid: 'good-correction-uuid', targets: 1 });
     assert.equal(status, 201);
   });
+
+  test('a correction pointing at an entry that does not exist is rejected', async () => {
+    // Only the DO knows which ids exist, so this rejection comes from the append path.
+    // Letting it through would park a permanent no-op in the log.
+    const [status, body] = await post({
+      type: 'correction', uuid: 'ghost-target-uuid', targets: 999_999,
+    });
+    assert.equal(status, 400);
+    assert.match(body.error, /does not exist/);
+  });
+
+  test('a correction with a non-positive target is rejected', async () => {
+    assert.equal((await post({ type: 'correction', uuid: 'zero-target-uuid', targets: 0 }))[0], 400);
+    assert.equal((await post({ type: 'correction', uuid: 'neg-target-uuid1', targets: -3 }))[0], 400);
+  });
+
+  test('a garbage replacement is rejected instead of persisted', async () => {
+    // `replacement: "garbage"` would otherwise spread into {"0":"g","1":"a",...} and sit in
+    // the permanent log scoring nothing.
+    const [status, body] = await post({
+      type: 'correction', uuid: 'garbage-replacement-1', targets: 1, replacement: 'garbage',
+    });
+    assert.equal(status, 400);
+    assert.match(body.error, /replacement must be a JSON object/);
+  });
+
+  test('a replacement with an unknown type is rejected', async () => {
+    const [status, body] = await post({
+      type: 'correction', uuid: 'bad-replacement-type1', targets: 1,
+      replacement: { type: 'tmie', event: 'swim', player: 'Lucas', value: 61 },
+    });
+    assert.equal(status, 400);
+    assert.match(body.error, /Unknown entry type/);
+  });
+
+  test('a replacement cannot itself be a correction', async () => {
+    // Replacements are spliced straight into the effective log and never re-processed as
+    // corrections, so a nested one would silently do nothing.
+    const [status, body] = await post({
+      type: 'correction', uuid: 'nested-correction-01', targets: 1,
+      replacement: { type: 'correction', targets: 1 },
+    });
+    assert.equal(status, 400);
+    assert.match(body.error, /cannot itself be a correction/);
+  });
+
+  test('a well-formed replacement is accepted', async () => {
+    const [status] = await post({
+      type: 'correction', uuid: 'good-replacement-001', targets: 1,
+      replacement: { type: 'time', event: 'swim', player: 'Lucas', value: 61 },
+    });
+    assert.equal(status, 201);
+  });
+
+  test('every rejected correction left the log untouched', async () => {
+    const [, body] = await getLog();
+    const rejected = [
+      'ghost-target-uuid', 'zero-target-uuid', 'neg-target-uuid1',
+      'garbage-replacement-1', 'bad-replacement-type1', 'nested-correction-01',
+    ];
+    for (const uuid of rejected) {
+      assert.equal(body.entries.some((e) => e.uuid === uuid), false, `${uuid} must not be in the log`);
+    }
+  });
 });
 
 describe('POST /log — append semantics', () => {

@@ -97,6 +97,22 @@ export class LogDO extends DurableObject {
       .toArray();
     if (existing.length) return { entry: hydrate(existing[0]), duplicate: true };
 
+    // A correction must point at something real. Only the DO knows which ids exist, so this
+    // check cannot live in the Worker's shape validation. Because ids are assigned at insert,
+    // "the target exists" also proves "the target is older" — you cannot correct the future,
+    // and a correction can never target itself.
+    //
+    // Safe for the offline outbox: a correction can only name an id the server already
+    // acknowledged, so a queued correction always refers to an entry that landed before it.
+    if (entry.type === 'correction') {
+      const target = this.sql
+        .exec('SELECT id FROM entries WHERE id = ?', entry.targets)
+        .toArray();
+      if (!target.length) {
+        return { error: `Correction targets entry ${entry.targets}, which does not exist.` };
+      }
+    }
+
     const { uuid, type, ts, ...body } = entry;
     this.sql.exec(
       'INSERT INTO entries (uuid, ts, type, body) VALUES (?, ?, ?, ?)',
@@ -183,6 +199,7 @@ async function handlePost(request, env, stub) {
   if (invalid) return problem(400, invalid);
 
   const result = await stub.append(entry);
+  if (result.error) return problem(400, result.error);
   return Response.json(result, {
     status: result.duplicate ? 200 : 201,
     headers: { 'cache-control': 'no-store' },
@@ -195,20 +212,44 @@ async function handlePost(request, env, stub) {
  * while Brad wondered why the board was wrong.
  */
 function validate(entry) {
-  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-    return 'Entry must be a JSON object.';
-  }
-  if (typeof entry.type !== 'string' || !ENTRY_TYPES.has(entry.type)) {
-    return `Unknown entry type: ${JSON.stringify(entry.type)}.`;
-  }
+  const shape = validateShape(entry, 'Entry');
+  if (shape) return shape;
+
   if (typeof entry.uuid !== 'string' || entry.uuid.length < 8 || entry.uuid.length > 128) {
     return 'Entry needs a client-generated uuid (8–128 characters).';
   }
   if (entry.ts !== undefined && !Number.isFinite(entry.ts)) {
     return 'Entry ts must be a number.';
   }
-  if (entry.type === 'correction' && !Number.isInteger(entry.targets)) {
-    return 'A correction must target an entry id.';
+
+  if (entry.type === 'correction') {
+    if (!Number.isInteger(entry.targets) || entry.targets < 1) {
+      return 'A correction must target an entry id.';
+    }
+    if (entry.replacement !== undefined) {
+      // A replacement goes into the permanent log exactly like a first-class entry, so it
+      // gets the same scrutiny. Without this, `replacement: "garbage"` spreads into
+      // {"0":"g","1":"a",...} and sits in the log forever, scoring nothing and explaining
+      // nothing. Note it is NOT checked for a uuid — it inherits the correction's.
+      const problem = validateShape(entry.replacement, 'A correction replacement');
+      if (problem) return problem;
+      if (entry.replacement.type === 'correction') {
+        // Replacements are spliced straight into the effective log; they are never
+        // re-processed as corrections, so one nested here would silently do nothing.
+        return 'A correction replacement cannot itself be a correction.';
+      }
+    }
+  }
+  return null;
+}
+
+/** The shape rules shared by a standalone entry and a correction's replacement payload. */
+function validateShape(candidate, label) {
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    return `${label} must be a JSON object.`;
+  }
+  if (typeof candidate.type !== 'string' || !ENTRY_TYPES.has(candidate.type)) {
+    return `Unknown entry type: ${JSON.stringify(candidate.type)}.`;
   }
   return null;
 }

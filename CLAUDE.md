@@ -89,6 +89,14 @@ visible, audited fixes. Nothing is ever mutated or deleted.
 - Wrong/missing PIN → `401`, checked *before* the body is read, so the log is never touched.
 - Malformed JSON or an unknown entry type → `400`. The log is permanent; junk that gets in
   never comes out.
+- A `correction` whose `targets` names an entry that doesn't exist → `400`. Only the Durable
+  Object knows which ids exist, so that check lives in the append path, not in shape
+  validation. Because ids are assigned at insert, "the target exists" also proves "the target
+  is older" — you cannot correct the future, and a correction cannot target itself.
+- A `replacement` payload gets **the same scrutiny as a first-class entry** (it must be an
+  object with a known `type`), minus the uuid, which it inherits from its correction. A
+  replacement may not itself be a `correction` — replacements are spliced straight into the
+  effective log and never re-processed, so a nested one would silently do nothing.
 
 ### Correction semantics
 
