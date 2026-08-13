@@ -888,6 +888,30 @@ describe("Tyler's burn ledger", () => {
     assert.deepEqual(mistyped.eligible, ['TM', 'TH'], 'TW is out — Wyatt is already burned');
   });
 
+  test('a team whose captain is not a player has nobody to burn, so the pick waits', () => {
+    // The Volleyball pick burns the CAPTAIN only (spec §6.1). A team carrying a mistyped captain
+    // therefore resolves to nobody — and must not put that typo in the ledger as a burnt player.
+    const teams = VOLLEYBALL_TEAMS.map((t) => (t.id === 'TM' ? { ...t, captain: 'Mitchell' } : t));
+    const log = buildLog([
+      { type: 'draft_assignment', event: 'beerball', teams: BEERBALL_PAIRS }, // burns Brad, Wyatt
+      { type: 'draft_assignment', event: 'volleyball', teams },
+      { type: 'tyler_pick', stage: 'volleyball', target: 'TM' },
+    ]);
+    const result = run(log);
+    const slot = result.burns.slots.find((s) => s.stage === 'volleyball');
+
+    assert.equal(slot.player, null);
+    assert.equal(slot.unresolvedTarget, 'TM');
+    assert.equal(result.burns.burned.includes('Mitchell'), false, 'a typo never becomes a burn');
+    assert.equal(result.burns.complete, false);
+    // Nor is a team nobody can burn offered as a pick in the first place.
+    assert.deepEqual(slot.eligible, ['TH'], "TM has no real captain; TW's is already burned");
+    assert.match(
+      result.issues.find((i) => i.code === 'pick-target-unknown').message,
+      /captain on the roster/,
+    );
+  });
+
   test('a pick naming somebody who is not a player is rejected, not burned', () => {
     // Same rule from the other side: a name nobody on the roster answers to cannot burn anyone,
     // and must not let the ledger claim five burns when one of them is fiction.

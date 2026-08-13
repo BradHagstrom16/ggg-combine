@@ -427,18 +427,21 @@ export function buildBurns({ drafts, picks, teamsByEvent }) {
     const isTeamPick = TYLER_BACKING[stageDef.stage].unit === 'team';
     const teams = teamsByEvent[stageDef.stage] ?? [];
     const pick = picks[stageDef.stage];
-    // Volleyball offers teams whose captain is still unburned; the others offer players.
+    // Volleyball offers teams whose captain is a real player and still unburned; the others
+    // offer players. A team whose captain field is a typo has nobody to burn, so it is not a
+    // pick Tyler can make (spec §6.1: the Volleyball pick burns the CAPTAIN only).
     const eligibleTargets = isTeamPick
-      ? teams.filter((t) => !burned.has(t.captain)).map((t) => t.id)
+      ? teams.filter((t) => ABLE.includes(t.captain) && !burned.has(t.captain)).map((t) => t.id)
       : eligible;
 
-    // A pick can name something that does not resolve: a team entered before its draft, or a
-    // player who is not on the roster at all. Either is an unresolved pick, not a burn of
-    // nobody — claiming the bad target would put a phantom in the burn list and let the ledger
-    // report five burns when one of them is a name that does not exist. The slot waits instead,
-    // keeping the eligible pool the UI shows; a team pick heals itself when the draft lands.
+    // Which makes both kinds of pick the same question: does this target name somebody who can
+    // actually be burned? A team entered before its draft, a team carrying a mistyped captain,
+    // a player nobody on the roster answers to — each is an unresolved pick, not a burn of
+    // nobody. Claiming the bad target would put a phantom in the ledger and let it report five
+    // burns when one of them does not exist. The slot waits instead, keeping the eligible pool
+    // the UI shows; a team pick heals itself as soon as the draft is right.
     const team = isTeamPick ? teams.find((t) => t.id === pick?.target) : null;
-    const resolved = isTeamPick ? Boolean(team) : ABLE.includes(pick?.target);
+    const resolved = ABLE.includes(isTeamPick ? team?.captain : pick?.target);
     if (!pick || !resolved) {
       slots.push({
         slot: stageDef.slots[0], stage: stageDef.stage, label: stageDef.label,
@@ -543,7 +546,7 @@ export function score(effective, options = {}) {
     if (!slot.unresolvedTarget) continue;
     addIssue('warn', 'pick-target-unknown',
       TYLER_BACKING[slot.stage].unit === 'team'
-        ? `${GM}'s ${EVENTS[slot.stage].label} pick names ${slot.unresolvedTarget}, which is not a team in that draft — enter the draft and the pick resolves itself.`
+        ? `${GM}'s ${EVENTS[slot.stage].label} pick names ${slot.unresolvedTarget}, which does not resolve to a drafted team with a captain on the roster — fix the draft and the pick resolves itself.`
         : `${GM}'s ${EVENTS[slot.stage].label} pick names ${slot.unresolvedTarget}, who is not an eligible player — re-enter the pick.`,
       { stage: slot.stage, target: slot.unresolvedTarget });
   }
