@@ -20,7 +20,10 @@ Individual Multiplier, round-robin standings, Tyler's GM points, tiebreak column
 Storage is an **append-only log** of raw inputs — times, game results, draft assignments, GM
 picks, overrides, knob turns. Computed points are never stored. Standings are a pure function
 of the log, recomputed on every render, which means standings at any moment are just
-`score(log.slice(0, i))` — so undo, audit, and a full weekend replay all come for free.
+`score(effectiveLog.slice(0, i))` — so undo, audit, and a full weekend replay all come for free.
+
+(Corrections resolve against the **whole** log first; the *effective* log is what gets sliced.
+See `CLAUDE.md` for why that ordering is deliberate.)
 
 One Cloudflare Worker serves both the site and the API from a single origin, backed by one
 SQLite-backed Durable Object. No framework, no build step.

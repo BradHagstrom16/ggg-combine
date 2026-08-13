@@ -1,0 +1,16 @@
+{
+  "name": "ggg-combine",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "GGG Combine 2026 — live standings and scoring for the 2nd annual fantasy football combine",
+  "scripts": {
+    "test": "node --test test/",
+    "test:scoring": "node --test test/scoring.test.js",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.123.0"
+  }
+}

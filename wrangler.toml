@@ -1,0 +1,31 @@
+name = "ggg-combine"
+main = "worker/worker.js"
+compatibility_date = "2026-08-13"
+
+# Static site (/public) and the API (/log) are served from the SAME origin by this
+# one Worker. That is deliberate: no GitHub Pages, no CORS, no preflights.
+#
+# run_worker_first pins the API paths to the Worker explicitly rather than relying
+# on them simply failing to match an asset. Debugging "why is my API returning
+# HTML" at 11pm mid-Gauntlet is not a thing that should be possible.
+[assets]
+directory = "./public"
+run_worker_first = ["/log", "/log/*"]
+
+# The append-only entry log lives in ONE Durable Object instance (name: "log").
+# Durable Objects are strongly consistent, so a write is visible to the next read.
+[[durable_objects.bindings]]
+name = "LOG"
+class_name = "LogDO"
+
+# Declarative export: LogDO is being created here for the first time, so it takes the
+# `exports` form rather than a legacy `[[migrations]]` block (the two are mutually
+# exclusive). `sqlite` storage is both what the append-only log wants and the
+# free-tier-eligible backend — `legacy-kv` Durable Objects are paid-plan only.
+[exports.LogDO]
+type = "durable-object"
+storage = "sqlite"
+
+# ADMIN_PIN is a secret, NOT a var — set it with:
+#   npx wrangler secret put ADMIN_PIN
+# It must never appear in this file or anywhere else in git.
