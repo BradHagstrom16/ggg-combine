@@ -303,6 +303,7 @@ body.tv .standings th.col-name, body.tv .standings td.name { position: static; }
   z-index: 50;
   padding: 20px;
 }
+.pin-overlay[hidden] { display: none; }
 .pin-card { background: #fff; border-radius: 14px; padding: 22px; width: 100%; max-width: 340px; box-shadow: var(--shadow); }
 .pin-card h2 { border: 0; margin: 0 0 6px; }
 
