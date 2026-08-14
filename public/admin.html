@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Commissioner · GGG Combine 2026</title>
+<link rel="icon" href="/logo.png">
+<link rel="stylesheet" href="/combine.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="/">
+    <img class="brand-logo" src="/logo.png" alt="">
+    <span class="brand-name">GGG Combine <b>2026</b></span>
+  </a>
+  <nav class="site-nav">
+    <a href="/">Standings</a>
+    <a href="/agenda">Agenda</a>
+    <a href="/rules">Rules</a>
+    <a class="admin-link" href="/admin" aria-current="page">Commissioner</a>
+    <span class="outbox-badge" id="outbox" hidden></span>
+  </nav>
+</header>
+
+<main class="admin">
+  <div class="pinned">
+    <div class="burns" id="burns"></div>
+    <div class="knobrow">
+      <span>×1.0</span>
+      <input type="range" id="knob" min="1.0" max="2.0" step="0.05" value="1.1">
+      <span>×2.0</span>
+      <span class="knobval" id="knobval">×1.1</span>
+    </div>
+    <div class="knob-preview" id="knobPreview"></div>
+  </div>
+
+  <div class="nudge" id="nudge" hidden></div>
+  <div class="admin-issues" id="adminIssues"></div>
+
+  <div id="forms"></div>
+
+  <div class="undo-strip" id="undoStrip"></div>
+
+  <details class="event" id="standingsPreview">
+    <summary>Live standings</summary>
+    <div class="event-body"><div class="board-scroll"><div id="miniBoard"></div></div></div>
+  </details>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<div class="pin-overlay" id="pinOverlay" hidden>
+  <div class="pin-card">
+    <h2>Commissioner PIN</h2>
+    <p class="muted" style="font-size:13px">Entered once on this device. It authorizes writes and is sent as a header, never stored in the log.</p>
+    <div class="field"><input type="password" id="pinInput" placeholder="PIN" autocomplete="off" style="flex:1"></div>
+    <button class="primary" id="pinSave">Save PIN</button>
+    <div class="admin-issue error" id="pinError" hidden></div>
+  </div>
+</div>
+
+<script type="module">
+  import { effectiveLog, score } from '/src/scoring.js';
+  import { EVENT_ORDER, EVENTS, ROSTER, ABLE, GM, KNOB, PICK_STAGES, clampKnob } from '/src/rules-config.js';
+  import { renderStandings } from '/src/render.js';
+  import {
+    burnTracker, burnChooser, finalizeNudges, knobRankPreview,
+    participantsFor, captainsFor, teamShapeFor,
+  } from '/src/admin-forms.js';
+  import { createOutbox } from '/src/outbox.js';
+  import { startSync } from '/src/sync.js';
+
+  /* ---- tiny DOM helper ---- */
+  function h(tag, props = {}, ...kids) {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (k === 'class') node.className = v;
+      else if (k === 'text') node.textContent = v;
+      else if (k === 'html') node.innerHTML = v;
+      else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
+      else if (v === true) node.setAttribute(k, '');
+      else if (v !== false && v != null) node.setAttribute(k, v);
+    }
+    for (const kid of kids.flat()) {
+      if (kid == null) continue;
+      node.appendChild(typeof kid === 'string' ? document.createTextNode(kid) : kid);
+    }
+    return node;
+  }
+  const uuid = () =>
+    (crypto.randomUUID ? crypto.randomUUID()
+      : 'u-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10));
+  const teamId = (eventId, captain) => `${eventId}-${captain}`;
+
+  /* ---- PIN ---- */
+  const PIN_KEY = 'ggg-pin';
+  const getPin = () => localStorage.getItem(PIN_KEY) || '';
+  const pinOverlay = document.getElementById('pinOverlay');
+  const pinError = document.getElementById('pinError');
+  function requirePin(message) {
+    pinError.hidden = !message;
+    if (message) pinError.textContent = message;
+    pinOverlay.hidden = false;
+    document.getElementById('pinInput').focus();
+  }
+  document.getElementById('pinSave').addEventListener('click', () => {
+    const val = document.getElementById('pinInput').value.trim();
+    if (!val) return;
+    localStorage.setItem(PIN_KEY, val);
+    pinOverlay.hidden = true;
+    flush();
+  });
+
+  /* ---- toast ---- */
+  const toastEl = document.getElementById('toast');
+  let toastTimer = null;
+  function toast(msg, kind = 'ok') {
+    toastEl.textContent = msg;
+    toastEl.className = `toast show ${kind}`;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toastEl.className = 'toast'; }, 2200);
+  }
+
+  /* ---- outbox ---- */
+  const outboxBadge = document.getElementById('outbox');
+  const outbox = createOutbox({
+    post: async (entry) => {
+      const res = await fetch('/log', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-combine-pin': getPin() },
+        body: JSON.stringify(entry),
+      });
+      if (res.status === 401) requirePin('That PIN was rejected. Try again.');
+      return { status: res.status };
+    },
+    storage: localStorage,
+    key: 'ggg-outbox',
+    onChange: (count) => {
+      outboxBadge.hidden = count === 0;
+      outboxBadge.textContent = `${count} queued`;
+    },
+    onReject: (e) => toast(`Rejected: ${e.type} (see rules)`, 'error'),
+  });
+  const flush = () => outbox.flush().then(() => refresh());
+
+  /* ---- state ---- */
+  let rawLog = [];
+  let effective = [];
+  let scored = null;
+  const openSections = new Set();
+  let knobDragging = false;
+
+  const sync = startSync({
+    onData(view) {
+      rawLog = view.entries || [];
+      effective = effectiveLog(rawLog);
+      scored = score(effective);
+      renderStatus();
+    },
+  });
+
+  async function refresh(rebuildForms = false) {
+    await sync.pollOnce();
+    if (rebuildForms) renderForms();
+  }
+
+  async function submit(payload, btn) {
+    if (!getPin()) { requirePin('Enter your PIN to save.'); return; }
+    if (btn) btn.disabled = true;
+    const outcome = await outbox.send({ ...payload, uuid: uuid() });
+    if (outcome === 'ok') { toast('Saved', 'ok'); await refresh(true); }
+    else if (outcome === 'rejected') toast('Rejected — check the entry', 'error');
+    else toast('Offline — queued, will send on reconnect', 'warn');
+    if (btn) btn.disabled = false;
+  }
+
+  /* ---- status panels (safe to re-render on poll: no free-text inputs) ---- */
+  const burnsEl = document.getElementById('burns');
+  const knobSlider = document.getElementById('knob');
+  const knobVal = document.getElementById('knobval');
+  const knobPreview = document.getElementById('knobPreview');
+  const nudgeEl = document.getElementById('nudge');
+  const issuesEl = document.getElementById('adminIssues');
+  const undoEl = document.getElementById('undoStrip');
+  const miniBoard = document.getElementById('miniBoard');
+
+  function slotLabel(s) {
+    if (s.filled) {
+      if (s.team) return `${s.slot} ${s.label}: ${s.team.replace(/^.*-/, '')}`;
+      return `${s.slot} ${s.label}: ${s.player}`;
+    }
+    if (s.unresolvedTarget) return `${s.slot} ${s.label}: ⚠ ${s.unresolvedTarget}?`;
+    return `${s.slot} ${s.label} — ${s.eligibleCount ?? 0} eligible`;
+  }
+  function renderBurns() {
+    const t = burnTracker(scored);
+    burnsEl.replaceChildren(
+      h('div', { class: 'burns-title', html: `Tyler burn tracker — <b>${t.burnedCount} of ${t.total}</b> burned${t.hasDuplicates ? ' · ⚠ DUPLICATE' : ''}` }),
+      ...t.slots.map((s) =>
+        h('span', { class: `slot${s.filled ? '' : ' open'}${s.duplicate ? ' dup' : ''}`, text: slotLabel(s) })),
+    );
+  }
+  function renderKnob() {
+    if (!knobDragging) {
+      knobSlider.value = String(scored.knob);
+      knobVal.textContent = `×${Number(scored.knob).toString()}`;
+    }
+  }
+  function renderNudges() {
+    const nudges = finalizeNudges(scored);
+    nudgeEl.hidden = nudges.length === 0;
+    if (nudges.length) nudgeEl.textContent = `Ready to finalize: ${nudges.map((n) => n.short).join(', ')}`;
+  }
+  function renderIssues() {
+    const items = (scored.issues || []).filter((i) => i.level === 'error' || i.level === 'warn');
+    issuesEl.replaceChildren(
+      ...items.map((i) => h('div', { class: `admin-issue ${i.level}`, text: `${i.level === 'error' ? '⛔' : '⚠'} ${i.message || i.code}` })),
+    );
+  }
+  function entryLabel(e) {
+    const short = (id) => (EVENTS[id] ? EVENTS[id].short : id);
+    switch (e.type) {
+      case 'time': return `${short(e.event)} — ${e.player} ${e.value}`;
+      case 'draft_assignment': return `${short(e.event)} draft`;
+      case 'wiffle_result': return `Wiffle winner`;
+      case 'beerball_game': return `Beer Ball game ${e.gameSlot}`;
+      case 'volleyball_set': return `Volleyball m${e.matchSlot} set ${e.setNo}`;
+      case 'tyler_pick': return `Tyler ${e.stage} pick → ${e.target}`;
+      case 'override': return `${short(e.event)} override`;
+      case 'championship_tiebreak': return `Tiebreak → ${e.winner}`;
+      case 'knob': return `Knob ×${e.value}`;
+      case 'event_final': return `Finalize ${short(e.event)}`;
+      case 'correction': return `Undo #${e.targets}`;
+      default: return e.type;
+    }
+  }
+  function renderUndo() {
+    const recent = rawLog.slice(-6).reverse();
+    undoEl.replaceChildren(
+      h('h3', { text: 'Recent entries — undo appends a correction' }),
+      ...recent.map((e) =>
+        h('div', { class: 'undo-row' },
+          h('span', { text: `#${e.id} ${entryLabel(e)}` }),
+          h('span', { class: 'u', role: 'button', onclick: () => submit({ type: 'correction', targets: e.id }, null), text: e.type === 'correction' ? 'redo' : 'undo' }))),
+    );
+  }
+  function renderMiniBoard() {
+    if (document.getElementById('standingsPreview').open) renderStandings(miniBoard, scored, {}, { legend: false });
+  }
+  function renderStatus() {
+    if (!scored) return;
+    renderBurns();
+    renderKnob();
+    renderNudges();
+    renderIssues();
+    renderUndo();
+    renderMiniBoard();
+  }
+
+  /* ---- knob slider: live rank-swap preview, commit on release ---- */
+  knobSlider.addEventListener('input', () => {
+    knobDragging = true;
+    const v = clampKnob(knobSlider.value);
+    knobVal.textContent = `×${v.toString()}`;
+    knobPreview.textContent = effective.length ? knobRankPreview(effective, v).summary : '';
+  });
+  knobSlider.addEventListener('change', async () => {
+    const v = clampKnob(knobSlider.value);
+    knobDragging = false;
+    knobPreview.textContent = '';
+    if (v !== scored.knob) await submit({ type: 'knob', value: v }, null);
+  });
+
+  /* ---- entry forms (rebuilt only on load + after a submit — never on poll) ---- */
+  const formsEl = document.getElementById('forms');
+
+  function combos(list) {
+    const out = [];
+    for (let i = 0; i < list.length; i += 1) for (let j = i + 1; j < list.length; j += 1) out.push([list[i], list[j]]);
+    return out;
+  }
+  const teamsOf = (eventId) => (scored.events[eventId] && scored.events[eventId].teams) || null;
+
+  function draftSubform(eventId) {
+    const ev = EVENTS[eventId];
+    const captains = captainsFor(eventId);
+    const parts = participantsFor(eventId);
+    const shape = teamShapeFor(eventId);
+    // one <select> per participant → which captain's team they join
+    const assign = {};
+    for (const c of captains) assign[c] = teamId(eventId, c); // captains default to their own team
+    const rows = parts.map((p) => {
+      const sel = h('select', { onchange: (e) => { assign[p] = e.target.value; } },
+        h('option', { value: '' }, '—'),
+        ...captains.map((c) => h('option', { value: teamId(eventId, c), selected: assign[p] === teamId(eventId, c) }, `Team ${c}`)));
+      return h('div', { class: 'field' }, h('label', { text: p }), sel);
+    });
+    const hint = eventId === 'wiffle'
+      ? h('p', { class: 'muted', style: 'font-size:12px' }, `${GM} is on the 6-player side. Sizes: 6 v 5.`)
+      : shape.teamSizes ? h('p', { class: 'muted', style: 'font-size:12px' }, `Team sizes: ${shape.teamSizes.join(' / ')}.`)
+      : h('p', { class: 'muted', style: 'font-size:12px' }, `${shape.teamCount} teams of ${shape.teamSize}.`);
+    const save = h('button', { class: 'primary' }, `Save ${ev.short} draft`);
+    save.addEventListener('click', () => {
+      const teams = captains.map((c) => {
+        const id = teamId(eventId, c);
+        const members = parts.filter((p) => assign[p] === id);
+        if (parts.includes(c) && !members.includes(c)) members.unshift(c); // playing captain is a member
+        return { id, captain: c, members };
+      });
+      submit({ type: 'draft_assignment', event: eventId, teams }, save);
+    });
+    return h('div', { class: 'subform' }, h('h3', { text: 'Draft' }), hint, ...rows, save);
+  }
+
+  function timesSubform(eventId) {
+    const ev = EVENTS[eventId];
+    const parts = participantsFor(eventId);
+    const values = (scored.events[eventId] && scored.events[eventId].values) || {};
+    const inputs = {};
+    const rows = parts.map((p) => {
+      const inp = h('input', { type: 'number', step: 'any', inputmode: 'decimal', value: values[p] ?? '' });
+      inputs[p] = inp;
+      return h('div', { class: 'field' }, h('label', { text: p }), inp);
+    });
+    const save = h('button', { class: 'primary' }, `Save ${ev.short} ${ev.unit === 'points' ? 'scores' : 'times'}`);
+    save.addEventListener('click', async () => {
+      save.disabled = true;
+      let sent = 0;
+      for (const p of parts) {
+        const raw = inputs[p].value.trim();
+        if (raw === '') continue; // blank = pending (or 0 after finalize) — not sent
+        const value = Number(raw);
+        if (!Number.isFinite(value)) continue;
+        if (values[p] === value) continue; // unchanged — skip
+        await outbox.send({ type: 'time', event: eventId, player: p, value, uuid: uuid() });
+        sent += 1;
+      }
+      toast(sent ? `Saved ${sent} ${ev.short} entr${sent === 1 ? 'y' : 'ies'}` : 'No changes', sent ? 'ok' : 'warn');
+      await refresh(true);
+      save.disabled = false;
+    });
+    return h('div', { class: 'subform' },
+      h('h3', { text: `${ev.unit === 'points' ? 'Scores' : 'Times'} (${ev.unit}${ev.direction ? ', ' + (ev.direction === 'lower' ? 'lower better' : 'higher better') : ''}) — blank = pending` }),
+      ...rows, save);
+  }
+
+  function wiffleResultSubform() {
+    const teams = teamsOf('wiffle');
+    if (!teams) return h('div', { class: 'subform' }, h('h3', { text: 'Winner' }), h('p', { class: 'muted', style: 'font-size:12px' }, 'Enter the draft first.'));
+    const current = scored.events.wiffle.winner || null;
+    let chosen = current;
+    const picks = teams.map((t) =>
+      h('label', { class: `pick${chosen === t.id ? ' selected' : ''}` },
+        h('input', { type: 'radio', name: 'wiffleWinner', checked: chosen === t.id, onchange: () => { chosen = t.id; } }),
+        h('span', { text: `Team ${t.captain} — ${t.members.join(', ')}` })));
+    const save = h('button', { class: 'primary' }, 'Save winner (100 / 0)');
+    save.addEventListener('click', () => { if (chosen) submit({ type: 'wiffle_result', event: 'wiffle', winner: chosen }, save); });
+    return h('div', { class: 'subform' }, h('h3', { text: 'Winner (winner-take-all)' }), ...picks, save);
+  }
+
+  function beerballGamesSubform() {
+    const teams = teamsOf('beerball');
+    if (!teams) return h('div', { class: 'subform' }, h('h3', { text: 'Games' }), h('p', { class: 'muted', style: 'font-size:12px' }, 'Enter the draft first.'));
+    const byGame = {};
+    for (const g of (scored.events.beerball.games || [])) byGame[g.gameSlot] = g;
+    const pairings = combos(teams);
+    const rows = pairings.map(([a, b], i) => {
+      const slot = i + 1;
+      const existing = byGame[slot] || {};
+      let winner = existing.winner || null;
+      const beers = { [a.id]: h('input', { type: 'number', step: '0.5', min: '0', inputmode: 'decimal', value: existing.beers ? (existing.beers[a.id] ?? '') : '', style: 'min-width:66px' }),
+        [b.id]: h('input', { type: 'number', step: '0.5', min: '0', inputmode: 'decimal', value: existing.beers ? (existing.beers[b.id] ?? '') : '', style: 'min-width:66px' }) };
+      const winSel = h('select',
+        { onchange: (e) => { winner = e.target.value || null; } },
+        h('option', { value: '' }, 'winner?'),
+        h('option', { value: a.id, selected: winner === a.id }, a.captain),
+        h('option', { value: b.id, selected: winner === b.id }, b.captain));
+      const save = h('button', { class: 'ghost' }, 'save');
+      save.addEventListener('click', () => {
+        if (!winner) { toast('Pick a winner', 'warn'); return; }
+        submit({ type: 'beerball_game', gameSlot: slot, pairs: [a.id, b.id], winner,
+          beers: { [a.id]: Number(beers[a.id].value || 0), [b.id]: Number(beers[b.id].value || 0) } }, save);
+      });
+      return h('div', { class: 'game-row' },
+        h('span', { class: 'gl' }, `${slot}. ${a.captain} v ${b.captain}`),
+        winSel,
+        h('div', { class: 'field', style: 'padding:0;gap:6px' }, h('label', { text: a.captain }), beers[a.id], h('label', { text: b.captain }), beers[b.id]),
+        save);
+    });
+    return h('div', { class: 'subform' }, h('h3', { text: 'Games (round robin · winner + beers 0.5)' }), ...rows);
+  }
+
+  function volleyballSetsSubform() {
+    const teams = teamsOf('volleyball');
+    if (!teams) return h('div', { class: 'subform' }, h('h3', { text: 'Sets' }), h('p', { class: 'muted', style: 'font-size:12px' }, 'Enter the draft first.'));
+    const matches = combos(teams);
+    const byMatch = {};
+    for (const m of (scored.events.volleyball.matches || [])) byMatch[m.matchSlot] = m;
+    const blocks = matches.map(([a, b], mi) => {
+      const matchSlot = mi + 1;
+      const existing = byMatch[matchSlot];
+      const setRows = [1, 2, 3].map((setNo) => {
+        const set = existing && existing.sets ? existing.sets.find((s) => s.setNo === setNo) : null;
+        const av = set && set.scores ? (set.scores[a.id] ?? '') : '';
+        const bv = set && set.scores ? (set.scores[b.id] ?? '') : '';
+        const ia = h('input', { type: 'number', min: '0', inputmode: 'numeric', value: av, style: 'min-width:60px' });
+        const ib = h('input', { type: 'number', min: '0', inputmode: 'numeric', value: bv, style: 'min-width:60px' });
+        const save = h('button', { class: 'ghost' }, 'save');
+        save.addEventListener('click', () => {
+          if (ia.value === '' || ib.value === '') { toast('Enter both scores', 'warn'); return; }
+          submit({ type: 'volleyball_set', matchSlot, setNo, scores: { [a.id]: Number(ia.value), [b.id]: Number(ib.value) } }, save);
+        });
+        return h('div', { class: 'game-row' }, h('span', { class: 'gl' }, `set ${setNo}`),
+          h('div', { class: 'field', style: 'padding:0;gap:6px' }, h('label', { text: a.captain }), ia, h('label', { text: b.captain }), ib), save);
+      });
+      return h('div', {}, h('p', { style: 'font-weight:700;margin:8px 0 2px' }, `Match ${matchSlot}: ${a.captain} v ${b.captain} (best of 3)`), ...setRows);
+    });
+    return h('div', { class: 'subform' }, h('h3', { text: 'Sets' }), ...blocks);
+  }
+
+  function pickSubform(stage) {
+    const chooser = burnChooser(scored, stage);
+    const locked = scored.events[stage] && scored.events[stage].finalized;
+    let chosen = chooser.currentPick;
+    const opts = chooser.options.map((o) =>
+      h('label', { class: `pick${o.selected ? ' selected' : ''}${o.eligible ? '' : ' disabled'}` },
+        h('input', { type: 'radio', name: `pick-${stage}`, checked: o.selected, disabled: !o.eligible || locked, onchange: () => { chosen = o.id; } }),
+        h('span', {}, o.label, o.detail ? h('span', { class: 'burns-note' }, ` — ${o.detail}`) : null),
+        h('span', { class: 'why', text: o.eligible ? `burns ${o.burns}` : `⛔ ${o.reason}` })));
+    const save = h('button', { class: 'primary', disabled: locked || false }, locked ? 'Locked (event finalized)' : 'Lock pick');
+    if (!locked) save.addEventListener('click', () => { if (chosen) submit({ type: 'tyler_pick', stage, target: chosen }, save); });
+    return h('div', { class: 'subform' }, h('h3', { text: `Tyler's ${chooser.label} — ${chooser.eligibleCount} eligible` }), ...opts, save);
+  }
+
+  function overrideSubform(eventId) {
+    const teams = teamsOf(eventId);
+    if (!teams) return null;
+    const order = teams.map((t) => t.id);
+    const selects = [];
+    const rows = teams.map((_, pos) => {
+      const sel = h('select', { onchange: (e) => { order[pos] = e.target.value; } },
+        ...teams.map((t) => h('option', { value: t.id, selected: order[pos] === t.id }, `Team ${t.captain}`)));
+      selects.push(sel);
+      return h('div', { class: 'field' }, h('label', { text: `${pos + 1}${['st', 'nd', 'rd'][pos] || 'th'}` }), sel);
+    });
+    const reason = h('input', { type: 'text', placeholder: 'reason (e.g. chug-off)', style: 'flex:1' });
+    const save = h('button', { class: 'ghost' }, 'Save override (⚑ flags the event)');
+    save.addEventListener('click', () => {
+      const placements = selects.map((s) => s.value);
+      if (new Set(placements).size !== placements.length) { toast('Each team once', 'warn'); return; }
+      submit({ type: 'override', event: eventId, placements, reason: reason.value.trim() || undefined }, save);
+    });
+    return h('details', { class: 'event' }, h('summary', {}, 'Override final placements'),
+      h('div', { class: 'event-body' }, ...rows, h('div', { class: 'field' }, h('label', { text: 'reason' }), reason), save));
+  }
+
+  function finalizeSubform(eventId) {
+    const ev = scored.events[eventId];
+    const btn = ev.finalized
+      ? h('button', { class: 'ghost' }, `Un-finalize ${EVENTS[eventId].short}`)
+      : h('button', { class: 'primary' }, `Finalize ${EVENTS[eventId].short}`);
+    btn.addEventListener('click', () => {
+      if (ev.finalized) {
+        const fin = rawLog.filter((e) => e.type === 'event_final' && e.event === eventId).slice(-1)[0];
+        if (fin) submit({ type: 'correction', targets: fin.id }, btn);
+      } else {
+        submit({ type: 'event_final', event: eventId }, btn);
+      }
+    });
+    return h('div', { class: 'subform' }, h('h3', { text: 'Finalize' }),
+      h('p', { class: 'muted', style: 'font-size:12px' }, ev.finalized ? 'Finalized — un-finalizing re-opens the event and re-pends blanks.' : 'Finalize once every result is in. Blanks then score 0.'),
+      btn);
+  }
+
+  function eventSection(eventId) {
+    const ev = scored.events[eventId];
+    const cfg = EVENTS[eventId];
+    const body = h('div', { class: 'event-body' });
+    if (cfg.type === 'team') body.appendChild(draftSubform(eventId));
+    if (eventId === 'wiffle') body.appendChild(wiffleResultSubform());
+    if (eventId === 'beerball') body.appendChild(beerballGamesSubform());
+    if (PICK_STAGES.includes(eventId)) body.appendChild(pickSubform(eventId));
+    if (cfg.type === 'individual') body.appendChild(timesSubform(eventId));
+    if (eventId === 'volleyball') body.appendChild(volleyballSetsSubform());
+    if (cfg.type === 'team') { const ov = overrideSubform(eventId); if (ov) body.appendChild(ov); }
+    body.appendChild(finalizeSubform(eventId));
+
+    const statusClass = ev.status === 'final' ? 'final' : ev.status === 'unfinalized' ? 'unfinalized' : '';
+    const det = h('details', { class: 'event' },
+      h('summary', {}, `${cfg.order}. ${cfg.label}`, h('span', { class: `status-dot ${statusClass}`, text: ev.status })),
+      body);
+    if (openSections.has(eventId)) det.open = true;
+    det.addEventListener('toggle', () => { if (det.open) openSections.add(eventId); else openSections.delete(eventId); });
+    return det;
+  }
+
+  function ceremonySection() {
+    const champ = scored.championship || {};
+    const contenders = champ.contenders || [];
+    if (contenders.length < 2) return null;
+    let winner = null;
+    const opts = contenders.map((p) =>
+      h('label', { class: 'pick' },
+        h('input', { type: 'radio', name: 'tiebreak', onchange: () => { winner = p; } }), h('span', { text: p })));
+    const save = h('button', { class: 'primary' }, 'Record beer-pong winner');
+    save.addEventListener('click', () => { if (winner) submit({ type: 'championship_tiebreak', winner }, save); });
+    return h('details', { class: 'event', open: true },
+      h('summary', {}, '🏆 Championship tiebreak', h('span', { class: 'status-dot', text: `${contenders.length}-way tie` })),
+      h('div', { class: 'event-body' }, h('p', { class: 'muted', style: 'font-size:12px' }, `Tied on total${champ.resolvedBy === 'avgIndividualPlacement' ? ' and avg placement' : ''}: ${contenders.join(', ')}. Head-to-head beer pong decides.`), ...opts, save));
+  }
+
+  function renderForms() {
+    if (!scored) return;
+    formsEl.replaceChildren(...EVENT_ORDER.map(eventSection));
+    const ceremony = ceremonySection();
+    if (ceremony) formsEl.appendChild(ceremony);
+  }
+
+  document.getElementById('standingsPreview').addEventListener('toggle', renderMiniBoard);
+
+  /* ---- boot ---- */
+  if (!getPin()) requirePin();
+  rawLog = sync.getView().entries;
+  effective = effectiveLog(rawLog);
+  scored = score(effective);
+  renderStatus();
+  renderForms();
+</script>
+</body>
+</html>
