@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Standings · GGG Combine 2026</title>
+<link rel="icon" href="/logo.png">
+<link rel="stylesheet" href="/combine.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="/">
+    <img class="brand-logo" src="/logo.png" alt="">
+    <span class="brand-name">GGG Combine <b>2026</b></span>
+  </a>
+  <nav class="site-nav">
+    <a href="/" aria-current="page">Standings</a>
+    <a href="/agenda">Agenda</a>
+    <a href="/rules">Rules</a>
+    <a class="admin-link" href="/admin">Commissioner</a>
+  </nav>
+</header>
+
+<main class="board-wrap">
+  <div class="board-head">
+    <div class="board-title">
+      <h1>GGG Combine <b>2026</b></h1>
+      <div class="board-sub" id="subtitle">Connecting…</div>
+    </div>
+    <div class="chips">
+      <span class="chip knob" id="knob">INDIVIDUAL ×1.1</span>
+      <span class="chip unfinalized" id="unfinal" hidden></span>
+      <span class="age" id="age"></span>
+    </div>
+  </div>
+
+  <div class="issues-bar" id="issues" hidden></div>
+  <div class="board-scroll"><div id="board"><p class="muted">Loading standings…</p></div></div>
+</main>
+
+<script type="module">
+  // The standings are DERIVED on every render: raw log → effectiveLog → score → renderStandings.
+  // Nothing computed is stored. sync.js keeps the last-good log fresh (visibility-aware polling,
+  // ETag/304) and hands us entries; a wifi blip keeps the last board on screen with an amber stamp.
+  import { effectiveLog, score, movementSinceLastEvent } from '/src/scoring.js';
+  import {
+    renderStandings, progressSubtitle, knobChipText, ageLabel, issueSummary, issueText,
+  } from '/src/render.js';
+  import { startSync } from '/src/sync.js';
+
+  if (new URLSearchParams(location.search).has('tv')) document.body.classList.add('tv');
+
+  const boardEl = document.getElementById('board');
+  const subtitleEl = document.getElementById('subtitle');
+  const knobEl = document.getElementById('knob');
+  const unfinalEl = document.getElementById('unfinal');
+  const ageEl = document.getElementById('age');
+  const issuesEl = document.getElementById('issues');
+
+  let lastView = null;
+
+  function renderFromEntries(entries) {
+    const effective = effectiveLog(entries || []);
+    const result = score(effective);
+    const movement = movementSinceLastEvent(effective);
+
+    renderStandings(boardEl, result, movement);
+    subtitleEl.textContent = progressSubtitle(result);
+    knobEl.textContent = knobChipText(result.knob);
+
+    const unfinalized = Object.values(result.events).filter((e) => e.status === 'unfinalized');
+    unfinalEl.hidden = unfinalized.length === 0;
+    unfinalEl.textContent = unfinalized.length
+      ? `${unfinalized.map((e) => e.short).join(', ')} — finalize`
+      : '';
+
+    const { errors } = issueSummary(result.issues);
+    issuesEl.hidden = errors.length === 0;
+    issuesEl.textContent = errors.length ? `⚠ ${errors.map(issueText).join(' · ')}` : '';
+  }
+
+  function tickAge() {
+    if (!lastView) return;
+    if (!lastView.everLoaded) {
+      ageEl.textContent = lastView.stale ? 'offline — no cached board' : 'connecting…';
+      ageEl.classList.toggle('amber', !!lastView.stale);
+      return;
+    }
+    const stamp = ageLabel(lastView.ageMs ?? 0);
+    ageEl.textContent = lastView.stale ? `${stamp.text} · reconnecting` : stamp.text;
+    ageEl.classList.toggle('amber', stamp.amber || lastView.amber);
+  }
+
+  const sync = startSync({
+    onData(view) {
+      lastView = view;
+      renderFromEntries(view.entries);
+      tickAge();
+    },
+  });
+
+  // Render the cached last-good board instantly (before the first network reply resolves).
+  lastView = sync.getView();
+  renderFromEntries(lastView.entries);
+  tickAge();
+
+  // Tick the "updated Xs ago" stamp every second so a frozen board is visibly aging.
+  setInterval(tickAge, 1000);
+</script>
+</body>
+</html>

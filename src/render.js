@@ -12,7 +12,7 @@
  * Totals are displayed at 1 decimal so float dust can never silently defeat a §7 championship
  * tie; a pending cell (no data yet) is blank, never 0 (0 is a real, scored result).
  */
-import { round1 } from './rules-config.js';
+import { round1, EVENTS } from './rules-config.js';
 
 /* ---- Pure formatters --------------------------------------------------------------------- */
 
@@ -109,7 +109,11 @@ export function progressSubtitle(result) {
   const finals = events.filter((e) => e.status === 'final');
   const upcoming = events.find((e) => e.status !== 'final');
   const last = finals[finals.length - 1];
-  const prefix = last ? `${String(last.day).toUpperCase()} — AFTER ${last.short.toUpperCase()}` : 'NOT STARTED';
+  // The engine's event objects don't carry `day` — it's static config, so read it from rules.
+  const lastDay = last && EVENTS[last.id] ? EVENTS[last.id].day : null;
+  const prefix = last
+    ? `${lastDay ? `${lastDay.toUpperCase()} — ` : ''}AFTER ${last.short.toUpperCase()}`
+    : 'NOT STARTED';
   const suffix = upcoming ? `NEXT UP: ${upcoming.short.toUpperCase()}` : 'COMPLETE';
   return `${prefix} · ${suffix}`;
 }
@@ -159,11 +163,17 @@ export function renderStandings(root, result, movement = {}, opts = {}) {
   const backing = new Map(tylerBackingSummary(result).map((b) => [b.eventId, b]));
   const tbody = el('tbody');
 
+  // Crown the leader(s) only when someone is actually ahead. On an empty/all-tied board every
+  // player is rank 1, and 11 crowns is noise, not a leader.
+  const leaderCount = result.players.filter((p) => p.rank === 1).length;
+  const hasLeader = leaderCount > 0 && leaderCount < result.players.length;
+
   for (const row of result.players) {
-    const tr = el('tr', row.rank === 1 ? 'leader' : '');
+    const isLeader = hasLeader && row.rank === 1;
+    const tr = el('tr', isLeader ? 'leader' : '');
 
     const rankCell = el('td', 'rank', row.rankLabel);
-    if (row.rank === 1) rankCell.classList.add('is-leader');
+    if (isLeader) rankCell.classList.add('is-leader');
     tr.appendChild(rankCell);
 
     const mv = movementArrow(movement[row.player]);

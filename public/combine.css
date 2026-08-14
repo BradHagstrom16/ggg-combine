@@ -137,6 +137,120 @@ a:hover { text-decoration: underline; }
 .notice { padding: 12px 14px; border-radius: var(--radius); margin: 16px 0; }
 .notice.error { background: var(--error-bg); color: var(--error); border: 1px solid var(--error); }
 
+/* ---- 4. Standings (index.html) ----------------------------------------------------------- */
+.board-wrap { max-width: 1180px; margin: 0 auto; padding: 14px 16px 44px; }
+.board-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 6px 0 4px;
+}
+.board-title h1 { display: none; font-size: 24px; letter-spacing: 1px; text-transform: uppercase; margin: 0; }
+.board-title h1 b { color: var(--cardinal); }
+.board-sub {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-soft);
+  font-weight: 700;
+}
+.chips { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.chip {
+  border: 1.5px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  white-space: nowrap;
+}
+.chip.knob { border-color: var(--cardinal); color: var(--cardinal); }
+.chip.unfinalized { border-color: var(--warn); color: var(--warn); background: var(--warn-bg); }
+.age { font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+.age.amber { color: var(--amber); font-weight: 800; }
+
+.issues-bar {
+  background: var(--error-bg);
+  color: var(--error);
+  border: 1px solid var(--error);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  margin: 10px 0 2px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.board-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table.standings { width: 100%; border-collapse: collapse; margin-top: 10px; }
+.standings th {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-soft);
+  border-bottom: 2px solid var(--line-strong);
+  padding: 8px 6px;
+  text-align: right;
+  white-space: nowrap;
+}
+.standings th.col-name { text-align: left; }
+.standings td {
+  padding: 9px 6px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+}
+.standings td.rank { font-size: 22px; font-weight: 800; text-align: center; width: 48px; white-space: nowrap; }
+.standings td.rank.is-leader::after { content: " 👑"; font-size: 13px; }
+.standings td.name { text-align: left; font-size: 18px; font-weight: 700; }
+.standings .tyler-note { display: block; font-size: 11px; font-weight: 500; color: var(--ink-soft); }
+.standings td.total {
+  font-size: 22px;
+  font-weight: 800;
+  border-left: 2px solid var(--line-strong);
+  padding-left: 12px;
+}
+.standings tr.leader { background: #fff5f0; }
+.standings th.pend, .standings td.cell-pending { background: var(--pending); }
+.standings td.cell-na { color: #cfcfd2; }
+.standings .flag { color: var(--cardinal); font-size: 12px; margin-left: 3px; }
+.standings td.mv { font-size: 11px; width: 36px; }
+.standings .mv-up { color: var(--ok); }
+.standings .mv-down { color: var(--cardinal); }
+.standings .mv-none { color: var(--ink-soft); }
+.standings td.is-unfinalized .pts::after { content: "*"; color: var(--warn); font-weight: 800; }
+
+/* Pin rank + name while the event columns scroll on a narrow phone. */
+.standings th.col-rank, .standings td.rank { position: sticky; left: 0; background: var(--bg); z-index: 1; }
+.standings th.col-name, .standings td.name { position: sticky; left: 48px; background: var(--bg); z-index: 1; }
+.standings tr.leader td.rank, .standings tr.leader td.name { background: #fff5f0; }
+
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 11px; color: var(--ink-soft); margin-top: 12px; }
+
+/* ---- 6. TV mode (?tv=1): no chrome, type scaled to the viewport ------------------------- */
+body.tv .site-header { display: none; }
+body.tv .board-wrap { max-width: none; padding: 2.2vh 3vw; }
+body.tv .board-title h1 { display: block; font-size: 3vw; }
+body.tv .board-sub { font-size: 1.5vw; }
+body.tv .chip { font-size: 1.4vw; padding: 0.5vw 1.3vw; }
+body.tv .age { font-size: 1.3vw; }
+body.tv .issues-bar { font-size: 1.5vw; }
+body.tv .standings th { font-size: 1.1vw; }
+body.tv .standings td { font-size: 2.2vw; padding: 1.1vh 0.7vw; }
+body.tv .standings td.rank { font-size: 3vw; width: 5vw; }
+body.tv .standings td.rank.is-leader::after { font-size: 1.8vw; }
+body.tv .standings td.name { font-size: 2.5vw; }
+body.tv .standings td.total { font-size: 3vw; }
+body.tv .standings .tyler-note { font-size: 1.2vw; }
+body.tv .standings td.mv { font-size: 1.4vw; width: 3vw; }
+body.tv .legend { font-size: 1.2vw; }
+/* On the big screen nothing scrolls sideways — the columns simply fit. */
+body.tv .standings th.col-rank, body.tv .standings td.rank,
+body.tv .standings th.col-name, body.tv .standings td.name { position: static; }
+
 /* ---- Agenda ------------------------------------------------------------------------------ */
 .agenda-day { margin: 26px 0; }
 .agenda-list { list-style: none; margin: 8px 0 0; padding: 0; }
