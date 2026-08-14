@@ -12,7 +12,7 @@
  * Totals are displayed at 1 decimal so float dust can never silently defeat a §7 championship
  * tie; a pending cell (no data yet) is blank, never 0 (0 is a real, scored result).
  */
-import { round1, EVENTS } from './rules-config.js';
+import { round1, EVENTS, GM } from './rules-config.js';
 
 /* ---- Pure formatters --------------------------------------------------------------------- */
 
@@ -181,8 +181,8 @@ export function renderStandings(root, result, movement = {}, opts = {}) {
 
     const nameCell = el('td', 'name');
     nameCell.appendChild(el('span', 'player-name', row.player));
-    const backs = tylerBackingSummary(result);
-    if (result.gm === row.player || row.player === 'Tyler') {
+    if (row.player === GM) {
+      const backs = tylerBackingSummary(result);
       const note = backs.length
         ? `GM · backs ${backs.map((b) => `${b.label} (${b.short})`).join(', ')}`
         : 'GM';
