@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rules · GGG Combine 2026</title>
+<link rel="icon" href="/logo.png">
+<link rel="stylesheet" href="/combine.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="/">
+    <img class="brand-logo" src="/logo.png" alt="">
+    <span class="brand-name">GGG Combine <b>2026</b></span>
+  </a>
+  <nav class="site-nav">
+    <a href="/">Standings</a>
+    <a href="/agenda">Agenda</a>
+    <a href="/rules" aria-current="page">Rules</a>
+    <a class="admin-link" href="/admin">Commissioner</a>
+  </nav>
+</header>
+
+<main class="content" id="rules">
+  <p class="muted">Loading the rules…</p>
+</main>
+
+<script type="module">
+  // The rules page renders the CHECKED-IN spec directly (fetched, then md.js → HTML) so it can
+  // never drift from combine-2026-spec.md, the locked source of truth.
+  import { renderMarkdown } from '/src/md.js';
+
+  const el = document.getElementById('rules');
+  try {
+    const res = await fetch('/combine-2026-spec.md', { cache: 'no-cache' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const md = await res.text();
+    el.innerHTML = renderMarkdown(md);
+    document.title = 'Rules · GGG Combine 2026';
+  } catch (err) {
+    el.innerHTML =
+      '<div class="notice error">Could not load the rules right now (' +
+      String(err.message || err) +
+      '). The full rules live in <code>combine-2026-spec.md</code> in the repo.</div>';
+  }
+</script>
+</body>
+</html>

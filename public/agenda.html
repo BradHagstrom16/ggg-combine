@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agenda · GGG Combine 2026</title>
+<link rel="icon" href="/logo.png">
+<link rel="stylesheet" href="/combine.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="/">
+    <img class="brand-logo" src="/logo.png" alt="">
+    <span class="brand-name">GGG Combine <b>2026</b></span>
+  </a>
+  <nav class="site-nav">
+    <a href="/">Standings</a>
+    <a href="/agenda" aria-current="page">Agenda</a>
+    <a href="/rules">Rules</a>
+    <a class="admin-link" href="/admin">Commissioner</a>
+  </nav>
+</header>
+
+<main class="content">
+  <h1>Agenda</h1>
+  <p class="muted">Order only — no clock times. Golf is an exhibition and scores zero combine points.</p>
+  <div id="agenda"><p class="muted">Loading…</p></div>
+</main>
+
+<script type="module">
+  // The agenda is DATA in rules-config.js (spec §9), rendered here in schedule order. It never
+  // touches standings — Golf lives here and only here, flagged as a zero-point exhibition.
+  import { AGENDA } from '/src/rules-config.js';
+
+  const esc = (s) =>
+    String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  const KIND_LABEL = {
+    social: 'Social',
+    exhibition: 'Exhibition · 0 pts',
+    draft: 'Draft',
+    event: 'Scored event',
+    pick: 'Tyler pick',
+    ceremony: 'Ceremony',
+  };
+
+  function renderItem(item) {
+    const note = item.note ? `<span class="agenda-note">${esc(item.note)}</span>` : '';
+    const kind = KIND_LABEL[item.kind] || esc(item.kind);
+    return (
+      `<li class="agenda-item kind-${esc(item.kind)}">` +
+      `<span class="agenda-label">${esc(item.label)}</span>` +
+      note +
+      `<span class="agenda-kind">${esc(kind)}</span>` +
+      `</li>`
+    );
+  }
+
+  const root = document.getElementById('agenda');
+  try {
+    root.innerHTML = AGENDA.map(
+      (day) =>
+        `<section class="agenda-day"><h2>${esc(day.day)}</h2>` +
+        `<ol class="agenda-list">${day.items.map(renderItem).join('')}</ol></section>`,
+    ).join('');
+  } catch (err) {
+    root.innerHTML = `<div class="notice error">Could not load the agenda (${esc(err.message || err)}).</div>`;
+  }
+</script>
+</body>
+</html>

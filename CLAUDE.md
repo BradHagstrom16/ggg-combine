@@ -65,11 +65,16 @@ localStorage cache ─▶ effectiveLog (corrections + latest-wins) ─▶ scorin
 | `combine-2026-spec.md` | Locked rules, checked in verbatim. Source of truth. |
 | `src/rules-config.js` | Roster, events, point tables, captains, schedule order, rank directions, tie-resolution rule lists, knob config. |
 | `src/scoring.js` | Pure `(effectiveLog) → standings`. **The product.** All correctness risk lives here. |
-| `src/render.js` | Shared DOM rendering for the standings table. |
+| `src/render.js` | Standings render layer: pure formatters (cell/total/movement/tyler-annotation) + one DOM writer. Shared by `index` and admin's knob preview. |
+| `src/sync.js` | Viewer poll/visibility/ETag-304/stale-cache state machine (pure transitions + thin fetch shell). |
+| `src/outbox.js` | Admin offline outbox: queue on failure, flush on reconnect, dequeue on 201 **and** 200-duplicate. |
+| `src/admin-forms.js` | Pure admin helpers: burn tracker/chooser (eligibility from the ledger, never recomputed), form option sources, finalize nudge, knob rank-swap preview. |
 | `src/md.js` | Tiny dependency-free markdown renderer (rules page reads the spec directly, so it can't drift). |
 | `worker/worker.js` | Worker + `LogDO` Durable Object: static assets, `GET /log`, `POST /log`. |
-| `public/*.html` | `index` (standings, `?tv=1` for TV), `admin`, `agenda`, `rules`. |
-| `test/` | `node:test`. Golden hand-computed weekend fixture is the primary gate. |
+| `public/*.html` | `index` (standings, `?tv=1` for TV), `admin`, `agenda`, `rules`. Import the shared engine as plain ES modules from `/src/…`. |
+| `public/src`, `public/combine-2026-spec.md` | **Committed symlinks** to `../src` and `../combine-2026-spec.md`. The browser must import the engine and fetch the spec, but both live outside `./public` (the assets dir) and there is no build step — wrangler's asset walker follows the symlinks, so `src/` stays the single source of truth. Do not copy `src/` into `public/`. |
+| `public/combine.css` | Shared stylesheet (cardinal `#C5050C` / black / white); `body.tv` variant for the projector. |
+| `test/` | `node:test`. Golden hand-computed weekend fixture is the primary gate. Front-end pure modules (render/sync/outbox/admin-forms/md) are tested the same way — no jsdom; DOM writers are validated in a real browser. |
 
 ## Entry vocabulary (the system contract)
 
