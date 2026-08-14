@@ -447,7 +447,7 @@ button.ghost {
 .game-row .gl { font-weight: 700; font-size: 13px; }
 .game-row > select { width: 100%; }              /* winner dropdown: full-width tap target */
 .game-row .field { justify-content: flex-start; } /* beer inputs sit together, left */
-.game-row .field input { width: 72px; flex: 0 0 auto; } /* cap width — kills the balloon */
+.game-row .field input { width: 72px; min-width: 0; flex: 0 0 auto; } /* cap width — kills the balloon; min-width:0 beats the base .field rule so this owns the size outright */
 .game-row > button.ghost { align-self: flex-start; }    /* save on its own line */
 
 /* First width breakpoint in the stylesheet: give the admin room on a laptop/tablet
