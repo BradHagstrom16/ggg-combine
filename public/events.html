@@ -179,10 +179,11 @@
   }
 
   function individualResults(result, id) {
-    const { rows, unit } = individualBoard(result, id);
+    const { rows, direction, unit } = individualBoard(result, id);
     const wrap = h('div', { class: 'res' });
-    const dirTxt = unit === 'points' ? 'points, higher better' : `${unit || 'time'}, lower better`;
-    wrap.appendChild(h('h4', {}, `Leaderboard · ${dirTxt}`));
+    // "better" wording follows the engine's direction; the column header follows the value type (unit).
+    const better = direction === 'higher' ? 'higher better' : 'lower better';
+    wrap.appendChild(h('h4', {}, `Leaderboard · ${unit || 'time'}, ${better}`));
     if (!rows.some((r) => !r.pending)) { wrap.appendChild(h('p', { class: 'muted', style: 'font-size:13px' }, 'Not started yet.')); return wrap; }
     const tb = h('table', { class: 'tbl' },
       h('tr', {}, h('th', { class: 'l' }, '#'), h('th', { class: 'l' }, 'Player'), h('th', {}, unit === 'points' ? 'Score' : 'Time'), h('th', {}, 'Pts')));
@@ -278,7 +279,12 @@
   function route() {
     const hash = location.hash.replace(/^#/, '');
     if (hash === 'players') return { view: 'players' };
-    if (hash.startsWith('player=')) return { view: 'players', player: decodeURIComponent(hash.slice(7)) };
+    if (hash.startsWith('player=')) {
+      const raw = hash.slice(7);
+      let name;
+      try { name = decodeURIComponent(raw); } catch { name = raw; } // malformed %-escape → fall back to raw
+      return { view: 'players', player: name };
+    }
     return { view: 'events' };
   }
 

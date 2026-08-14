@@ -96,6 +96,17 @@ test('wiffleBoard: winner-take-all, winner flagged with 100 / loser 0', () => {
   assert.equal(loser.points, 0);
 });
 
+test('wiffleBoard: a winner id matching no team reads as undecided (no phantom winner)', () => {
+  // A stale/malformed winner id must not leave decided=true with winner=null — the page would then
+  // dereference winner.captain and blank the whole By-event view.
+  const board = wiffleBoard({ events: { wiffle: {
+    teams: [{ id: 'A', captain: 'Murph', members: ['Murph'] }],
+    winner: 'no-such-team', teamPoints: {},
+  } } });
+  assert.equal(board.winner, null);
+  assert.equal(board.decided, false);
+});
+
 test('individualBoard: leaderboard sorted by placement, values + points + config', () => {
   const swim = individualBoard(golden(), 'swim');
   assert.equal(swim.direction, 'lower');

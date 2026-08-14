@@ -161,7 +161,10 @@ export function wiffleBoard(result) {
     id: t.id, captain: t.captain, members: t.members || [],
     points: pts[t.id] ?? null, isWinner: ev.winner === t.id,
   }));
-  return { teams, winner: teams.find((t) => t.isWinner) || null, decided: !!ev.winner };
+  // `decided` follows the RESOLVED winner team, not the raw id: a winner id that matches no team
+  // (stale/malformed) must read as undecided so the page never renders a phantom winner.
+  const winner = teams.find((t) => t.isWinner) || null;
+  return { teams, winner, decided: !!winner };
 }
 
 /* ---- Individual result board ------------------------------------------------------------- */
