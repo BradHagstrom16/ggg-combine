@@ -5,6 +5,7 @@
  * is the one stylesheet every page links. Sections are added as the pages are built:
  *   1. Tokens + base            2. Header / nav        3. Rendered content (rules, agenda)
  *   4. Standings table (index)  5. Admin (admin.html)  6. TV mode overrides
+ *   7. Events + Players browse (events.html)
  */
 
 /* ---- 1. Tokens + base -------------------------------------------------------------------- */
@@ -206,6 +207,8 @@ table.standings { width: 100%; border-collapse: collapse; margin-top: 10px; }
 .standings td.rank { font-size: 22px; font-weight: 800; text-align: center; width: 48px; white-space: nowrap; }
 .standings td.rank.is-leader::after { content: " 👑"; font-size: 13px; }
 .standings td.name { text-align: left; font-size: 18px; font-weight: 700; }
+.standings td.name a.player-name { color: inherit; text-decoration: none; }
+.standings td.name a.player-name:hover { color: var(--cardinal); }
 .standings .tyler-note { display: block; font-size: 11px; font-weight: 500; color: var(--ink-soft); }
 .standings td.total {
   font-size: 22px;
@@ -518,6 +521,82 @@ button.ghost {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
 }
+
+/* ---- 7. Events + Players browse (events.html) -------------------------------------------- */
+/* Friends-facing: per-event progress/results + per-player drill-down. Reuses the board shell,
+   the details.event card, chips, and tokens; adds compact result tables and the player views. */
+.seg { display: inline-flex; border: 1.5px solid var(--line-strong); border-radius: 999px; overflow: hidden; margin: 8px 0 6px; }
+.seg a { padding: 7px 16px; font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: var(--ink-soft); }
+.seg a:hover { text-decoration: none; }
+.seg a.on { background: var(--cardinal); color: #fff; }
+
+.day-head { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--ink-soft); font-weight: 800; margin: 20px 0 2px; border-bottom: 2px solid var(--line); padding-bottom: 4px; }
+
+/* status-dot states beyond admin's final/unfinalized */
+details.event > summary .status-dot.live { color: var(--cardinal); border-color: var(--cardinal); }
+details.event > summary .status-dot.manual { color: var(--error); border-color: var(--error); background: var(--error-bg); }
+details.event > summary .status-dot.idle { color: var(--ink-soft); }
+
+.res h4 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--ink-soft); margin: 14px 0 6px; }
+.res h4:first-child { margin-top: 2px; }
+
+.teamrow { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
+.team-chip { border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px; font-size: 12.5px; background: var(--bg-soft); }
+.team-chip b { font-weight: 800; }
+.team-chip.win { border-color: var(--ok); background: #eaf7ee; }
+
+/* compact result / leaderboard table */
+.tbl { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+.tbl th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--ink-soft); text-align: right; padding: 5px 6px; border-bottom: 2px solid var(--line-strong); white-space: nowrap; }
+.tbl th.l, .tbl td.l { text-align: left; }
+.tbl td { padding: 7px 6px; border-bottom: 1px solid var(--line); text-align: right; }
+.tbl td.place { font-weight: 800; text-align: center; width: 30px; color: var(--ink-soft); }
+.tbl td.pts { font-weight: 800; }
+.tbl tr.win td.place { color: var(--ok); }
+.tbl tr.win td.place::after { content: " 👑"; font-size: 11px; }
+.tbl .sub { display: block; font-size: 11px; color: var(--ink-soft); font-weight: 500; }
+.tbl td.pend { background: var(--pending); color: var(--ink-soft); }
+
+.games { margin: 4px 0; display: grid; gap: 0; }
+.game-line { font-size: 13px; padding: 4px 0; border-bottom: 1px dashed var(--line); display: flex; justify-content: space-between; gap: 10px; }
+.game-line b { font-weight: 800; }
+.game-line .bx { color: var(--ink-soft); white-space: nowrap; }
+
+.match { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
+.match .mh { font-size: 13.5px; font-weight: 700; display: flex; justify-content: space-between; gap: 10px; }
+.match .sets { font-size: 12.5px; color: var(--ink-soft); margin-top: 3px; }
+
+.winbanner { font-size: 14px; font-weight: 800; padding: 8px 12px; border-radius: 8px; background: #eaf7ee; color: var(--ok); border: 1px solid var(--ok); margin: 2px 0 8px; }
+.winbanner.tbd { background: var(--bg-soft); color: var(--ink-soft); border-color: var(--line); }
+
+a.plink { color: inherit; border-bottom: 1px dotted var(--line-strong); }
+a.plink:hover { color: var(--cardinal); text-decoration: none; }
+
+/* player index — rank-ordered picker, doubles as a compact leaderboard */
+.plist { display: grid; margin-top: 8px; }
+.plist a { display: flex; align-items: center; gap: 12px; padding: 11px 8px; border-bottom: 1px solid var(--line); color: inherit; }
+.plist a:hover { background: var(--bg-soft); text-decoration: none; }
+.plist .pr { font-size: 20px; font-weight: 800; width: 34px; text-align: center; }
+.plist .pn { font-size: 17px; font-weight: 700; flex: 1; }
+.plist .pt { font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.plist .pm { font-size: 12px; width: 30px; text-align: right; }
+
+/* player detail */
+.back { font-size: 13px; font-weight: 700; color: var(--cardinal); display: inline-block; margin: 2px 0 12px; }
+.player-hd { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+.player-hd .nm { font-size: 26px; font-weight: 800; }
+.player-hd .rk { font-size: 14px; font-weight: 800; color: var(--ink-soft); }
+.player-hd .tot { font-size: 22px; font-weight: 800; margin-left: auto; font-variant-numeric: tabular-nums; }
+.mv-up { color: var(--ok); } .mv-down { color: var(--cardinal); } .mv-none { color: var(--ink-soft); }
+.gain { color: var(--ok); font-weight: 800; }
+
+/* TV variant: drop the interactive chrome, scale the type */
+body.tv .seg { display: none; }
+body.tv .day-head { font-size: 1.6vw; }
+body.tv details.event > summary { font-size: 2vw; }
+body.tv .tbl { font-size: 1.9vw; }
+body.tv .team-chip { font-size: 1.5vw; }
+body.tv .game-line { font-size: 1.7vw; }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }

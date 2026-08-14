@@ -180,7 +180,14 @@ export function renderStandings(root, result, movement = {}, opts = {}) {
     tr.appendChild(el('td', `mv mv-${mv.dir}`, mv.text));
 
     const nameCell = el('td', 'name');
-    nameCell.appendChild(el('span', 'player-name', row.player));
+    // opts.playerHref, when given, links the name (the /events drill-down); otherwise a plain span.
+    if (typeof opts.playerHref === 'function') {
+      const a = el('a', 'player-name', row.player);
+      a.href = opts.playerHref(row.player);
+      nameCell.appendChild(a);
+    } else {
+      nameCell.appendChild(el('span', 'player-name', row.player));
+    }
     if (row.player === GM) {
       const backs = tylerBackingSummary(result);
       const note = backs.length
