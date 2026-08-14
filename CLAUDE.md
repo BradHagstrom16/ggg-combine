@@ -123,7 +123,7 @@ visible, audited fixes. Nothing is ever mutated or deleted.
 | `draft_assignment` | event, teams/pairs with captains | (event) |
 | `time` | event, player, value — seconds (Swim/Gauntlet, lower better) or bag score (Bags, higher better) | (event, player) |
 | `wiffle_result` | winning team | (event) |
-| `beerball_game` | gameSlot 1–10, pairs, winner, beers per side (0.5 steps) | (event, gameSlot) |
+| `beerball_game` | gameSlot 1–10, pairs, winner, beers per side (0.5 steps; winner 2, loser ≤1.5 — entry rule only, differential scoring unchanged) | (event, gameSlot) |
 | `volleyball_set` | matchSlot 1–3, setNo 1–3, scores | (event, matchSlot, setNo) |
 | `tyler_pick` | stage, target | (stage) — correctable until that stage's `event_final` |
 | `override` | event, final placements, reason | (event) — supersedes computation, ⚑-flagged |

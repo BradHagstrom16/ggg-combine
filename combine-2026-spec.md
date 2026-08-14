@@ -71,6 +71,7 @@ final_points = raw_points × knob
 ### 4.2 Beer Ball — Friday nightcap
 - 10 able players in **5 pairs**. 2v2 format (house rules, known to the group — the app does not need to encode gameplay).
 - **Full round robin: 10 games total, 4 per pair.** Two games running in parallel (schedule display nicety, not a rules requirement).
+- **Each game records the winner + beers finished per side (0.5 steps). The winner always finishes 2; the loser finishes 1.5 or fewer.** This is a data-entry rule only — standings still rank by the beer *differential* below, which is left unchanged.
 - Standings, in order: **wins → total beer differential (tracked to the 0.5 beer) → head-to-head → chug-off**.
 - Placement points: **100 / 75 / 50 / 25 / 0** to each member of the pair.
 - Captains: **Yuyi, Lucas, Josh, ATM, Tyler**. Tyler is a **non-playing GM captain** — see §6.
@@ -136,7 +137,7 @@ Suggested entities — reshape freely:
 - **Result**
   - Individual events: raw time per player (blank ⇒ 0 pts)
   - Wiffle: winner (A/B)
-  - Beer Ball: per-game — pairing, winner, beers finished per side (0.5 granularity)
+  - Beer Ball: per-game — pairing, winner, beers finished per side (0.5 granularity; winner 2, loser ≤ 1.5)
   - Volleyball: per-set scores
 - **TylerPick** (event, person/team picked, burn list, locked timestamp)
 - **Settings** (knob value)
