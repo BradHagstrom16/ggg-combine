@@ -256,6 +256,37 @@ test('autoRetry: backoff doubles (capped) while it keeps failing; only one timer
   assert.equal(timers.activeCount(), 1);
 });
 
+test('stop() is durable: an in-flight flush cannot re-arm a retry timer after stop()', async () => {
+  const timers = fakeTimers();
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const outbox = createOutbox({
+    post: scriptedPost(['throw']),
+    storage: fakeStorage(),
+    key: 'k',
+    autoRetry: true,
+    retryBaseMs: 1000,
+    setTimeoutImpl: timers.set,
+    clearTimeoutImpl: timers.clear,
+  });
+
+  await outbox.send(entry('a')); // queued → one retry timer armed
+  assert.equal(timers.activeCount(), 1);
+  const armedAfterSend = timers.armedCount();
+
+  outbox._setPost(async () => { await gate; throw new Error('still down'); });
+  const inflight = outbox.flush(); // parked on the gate, mid-drain
+  outbox.stop(); // cancels the pending timer AND must block the finally from re-arming
+  assert.equal(timers.activeCount(), 0);
+
+  release();
+  await inflight; // its finally calls scheduleRetry — which must now be a no-op
+
+  assert.equal(timers.activeCount(), 0); // not resurrected
+  assert.equal(timers.armedCount(), armedAfterSend); // no new timer armed after stop()
+  assert.equal(outbox.count(), 1); // entry still queued, just no auto-retry
+});
+
 test('autoRetry stays off by default in a non-browser context (no timers armed)', async () => {
   let armed = 0;
   const outbox = createOutbox({

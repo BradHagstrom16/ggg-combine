@@ -87,6 +87,7 @@ export function createOutbox(deps) {
   let flushing = null; // the in-flight drain promise, or null — so callers can await a running drain
   let retryTimer = null;
   let backoff = retryBaseMs;
+  let stopped = false; // once stop()ed, no path (incl. an in-flight flush's finally) may re-arm a timer
 
   const persist = () => {
     if (storage) saveQueue(storage, key, queue);
@@ -114,7 +115,7 @@ export function createOutbox(deps) {
    * doubles per arming up to the ceiling and resets to base once the queue drains.
    */
   function scheduleRetry() {
-    if (!autoRetry || !setTimeoutImpl || retryTimer != null || queue.length === 0) return;
+    if (stopped || !autoRetry || !setTimeoutImpl || retryTimer != null || queue.length === 0) return;
     const delay = backoff;
     backoff = Math.min(backoff * 2, retryMaxMs);
     // Return the flush promise from the callback: the real setTimeout ignores it, but an injected
@@ -174,7 +175,9 @@ export function createOutbox(deps) {
     flush,
     count: () => queue.length,
     getQueue: () => queue.slice(),
-    stop: () => { clearRetry(); removeOnline(); }, // teardown: kill the retry timer + online listener
+    // Teardown: latch stopped FIRST so an in-flight flush's finally can't re-arm, then kill the
+    // current timer + online listener.
+    stop: () => { stopped = true; clearRetry(); removeOnline(); },
     _setPost: (fn) => { post = fn; }, // test seam: swap the transport between offline and online
   };
 }
