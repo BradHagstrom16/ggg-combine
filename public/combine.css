@@ -432,8 +432,39 @@ button.ghost {
   cursor: pointer;
 }
 
-.game-row { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center; padding: 8px 0; border-top: 1px dashed var(--line); }
+/* Scoring rows: beer ball games + volleyball sets. Phone-first — each control on
+   its own line so nothing overflows a narrow column; the min-width:720px block
+   below re-lays them as one row on a laptop. Scoped to .game-row so the plain
+   label+control .field rows elsewhere keep their space-between layout. */
+.game-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px dashed var(--line);
+}
 .game-row .gl { font-weight: 700; font-size: 13px; }
+.game-row > select { width: 100%; }              /* winner dropdown: full-width tap target */
+.game-row .field { justify-content: flex-start; } /* beer inputs sit together, left */
+.game-row .field input { width: 72px; flex: 0 0 auto; } /* cap width — kills the balloon */
+.game-row > button.ghost { align-self: flex-start; }    /* save on its own line */
+
+/* First width breakpoint in the stylesheet: give the admin room on a laptop/tablet
+   and lay each scoring row out on a single line. No-op on phones — viewport < 460
+   keeps the narrow column and the stacked rows above. */
+@media (min-width: 720px) {
+  .admin { max-width: 760px; }
+  .game-row {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+  }
+  .game-row .gl { margin-right: 4px; }
+  .game-row > select { width: auto; }
+  .game-row > button.ghost { align-self: center; }
+}
 
 .undo-strip { margin-top: 18px; border-top: 2px solid var(--line-strong); padding-top: 10px; }
 .undo-strip h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--ink-soft); }
