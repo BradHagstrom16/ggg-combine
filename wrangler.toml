@@ -8,6 +8,14 @@ compatibility_date = "2026-08-13"
 # run_worker_first pins the API paths to the Worker explicitly rather than relying
 # on them simply failing to match an asset. Debugging "why is my API returning
 # HTML" at 11pm mid-Gauntlet is not a thing that should be possible.
+#
+# The shared engine (src/) and the spec are a SIBLING of ./public, but the browser
+# must import them as plain ES modules with no build step. Two committed symlinks
+# bridge that gap: public/src -> ../src and public/combine-2026-spec.md. Wrangler's
+# asset walker follows them, so /src/scoring.js and /combine-2026-spec.md serve with
+# the right MIME type while src/ stays the single source of truth (verified: both
+# 200 with text/javascript + text/markdown). Do NOT copy src/ into public/ — the
+# symlinks keep one copy and honour the "no build step" rule.
 [assets]
 directory = "./public"
 run_worker_first = ["/log", "/log/*"]
