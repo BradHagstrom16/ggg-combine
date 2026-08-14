@@ -451,8 +451,8 @@ button.ghost {
 .game-row > button.ghost { align-self: flex-start; }    /* save on its own line */
 
 /* First width breakpoint in the stylesheet: give the admin room on a laptop/tablet
-   and lay each scoring row out on a single line. No-op on phones — viewport < 460
-   keeps the narrow column and the stacked rows above. */
+   and lay each scoring row out on a single line. Below 720px the query is inert, so
+   the stacked scoring rows above and the narrow column (max 460px) stay in force. */
 @media (min-width: 720px) {
   .admin { max-width: 760px; }
   .game-row {
