@@ -402,7 +402,7 @@
       save.addEventListener('click', () => {
         if (!winner) { toast('Pick a winner', 'warn'); return; }
         if (loserBeers == null) { toast("Enter loser's beers", 'warn'); return; }
-        if (loserBeers > 1.5) { toast('Loser must finish 1.5 or fewer', 'warn'); return; } // backstop; UI already caps
+        if (!LOSER_BEERS.some((v) => Number(v) === loserBeers)) { toast('Loser must finish 1.5 or fewer', 'warn'); return; }
         submit({ type: 'beerball_game', gameSlot: slot, pairs: [a.id, b.id], winner,
           beers: { [winner]: 2, [loserOf(winner)]: loserBeers } }, save);
       });
