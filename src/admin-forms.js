@@ -57,6 +57,24 @@ export function buildDraftTeams(captains, parts, assign, teamIdFor) {
   });
 }
 
+/**
+ * Rebuild the per-player assignment map from a SAVED draft — the inverse of buildDraftTeams — so the
+ * draft editor can pre-select each member's team on reload. Without this the editor seeds only
+ * captains, non-captains reset to "—", and a save-without-re-click drops them from the roster.
+ *
+ * Keyed off each team's CAPTAIN via `teamIdFor` (the same function the dropdown uses to build its
+ * option values), not the stored `team.id`, so read-back matches the options regardless of how the
+ * saved id was minted (admin uses `${event}-${captain}`; seeds/fixtures use arbitrary ids).
+ */
+export function assignFromTeams(teams, teamIdFor) {
+  const assign = {};
+  for (const t of teams || []) {
+    const id = teamIdFor(t.captain);
+    for (const m of t.members || []) assign[m] = id;
+  }
+  return assign;
+}
+
 /* ---- Burn tracker + chooser -------------------------------------------------------------- */
 
 /** The pinned "N of 5 burned" tracker: one entry per slot, in schedule order, straight off the ledger. */

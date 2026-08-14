@@ -65,7 +65,7 @@
   import { renderStandings } from '/src/render.js';
   import {
     burnTracker, burnChooser, finalizeNudges, knobRankPreview,
-    participantsFor, captainsFor, teamShapeFor, buildDraftTeams,
+    participantsFor, captainsFor, teamShapeFor, buildDraftTeams, assignFromTeams,
   } from '/src/admin-forms.js';
   import { createOutbox } from '/src/outbox.js';
   import { startSync } from '/src/sync.js';
@@ -289,6 +289,9 @@
     // one <select> per participant → which captain's team they join
     const assign = {};
     for (const c of captains) assign[c] = teamId(eventId, c); // captains default to their own team
+    // seed non-captain members from the SAVED draft so teams persist across reloads/re-saves
+    const savedTeams = teamsOf(eventId);
+    if (savedTeams) Object.assign(assign, assignFromTeams(savedTeams, (c) => teamId(eventId, c)));
     const rows = parts.map((p) => {
       const isCaptain = captains.includes(p);
       const sel = h('select', { disabled: isCaptain || false, onchange: (e) => { assign[p] = e.target.value; } },
@@ -363,30 +366,55 @@
     const byGame = {};
     for (const g of (scored.events.beerball.games || [])) byGame[g.gameSlot] = g;
     const pairings = combos(teams);
+    // House rule: the winner always finishes 2 beers, the loser 1.5 or fewer (0.5 steps). The winner's
+    // count is fixed (not an input) and the loser is capped, so an impossible game can't be entered.
+    const LOSER_BEERS = ['0', '0.5', '1', '1.5'];
     const rows = pairings.map(([a, b], i) => {
       const slot = i + 1;
       const existing = byGame[slot] || {};
-      let winner = existing.winner || null;
-      const beers = { [a.id]: h('input', { type: 'number', step: '0.5', min: '0', inputmode: 'decimal', value: existing.beers ? (existing.beers[a.id] ?? '') : '' }),
-        [b.id]: h('input', { type: 'number', step: '0.5', min: '0', inputmode: 'decimal', value: existing.beers ? (existing.beers[b.id] ?? '') : '' }) };
+      // only pre-fill from a saved game whose winner is actually one of this row's two teams — guards
+      // against a stored gameSlot whose pairing doesn't line up with the round-robin order laid out here
+      let winner = (existing.winner === a.id || existing.winner === b.id) ? existing.winner : null;
+      const loserOf = (w) => (w === a.id ? b.id : a.id);
+      const capOf = (id) => (id === a.id ? a.captain : b.captain);
+      // pre-fill the loser's beers from a saved game (the non-winner side)
+      let loserBeers = (winner && existing.beers) ? (existing.beers[loserOf(winner)] ?? null) : null;
+
+      const beersBox = h('div', { class: 'field', style: 'padding:0;gap:8px;align-items:center' });
+      function renderBeers() {
+        beersBox.replaceChildren();
+        if (!winner) { beersBox.appendChild(h('span', { class: 'muted', style: 'font-size:12px' }, 'pick winner →')); return; }
+        const loserId = loserOf(winner);
+        beersBox.appendChild(h('span', { style: 'font-size:13px;font-weight:600' }, `${capOf(winner)} 2 🍺`));
+        beersBox.appendChild(h('select',
+          { onchange: (e) => { loserBeers = e.target.value === '' ? null : Number(e.target.value); } },
+          h('option', { value: '' }, `${capOf(loserId)} beers?`),
+          ...LOSER_BEERS.map((v) => h('option', { value: v, selected: loserBeers != null && Number(v) === loserBeers }, `${capOf(loserId)} ${v}`))));
+      }
+
       const winSel = h('select',
-        { onchange: (e) => { winner = e.target.value || null; } },
+        { onchange: (e) => { winner = e.target.value || null; loserBeers = null; renderBeers(); } },
         h('option', { value: '' }, 'winner?'),
         h('option', { value: a.id, selected: winner === a.id }, a.captain),
         h('option', { value: b.id, selected: winner === b.id }, b.captain));
+
       const save = h('button', { class: 'ghost' }, 'save');
       save.addEventListener('click', () => {
         if (!winner) { toast('Pick a winner', 'warn'); return; }
+        if (loserBeers == null) { toast("Enter loser's beers", 'warn'); return; }
+        if (loserBeers > 1.5) { toast('Loser must finish 1.5 or fewer', 'warn'); return; } // backstop; UI already caps
         submit({ type: 'beerball_game', gameSlot: slot, pairs: [a.id, b.id], winner,
-          beers: { [a.id]: Number(beers[a.id].value || 0), [b.id]: Number(beers[b.id].value || 0) } }, save);
+          beers: { [winner]: 2, [loserOf(winner)]: loserBeers } }, save);
       });
+
+      renderBeers();
       return h('div', { class: 'game-row' },
         h('span', { class: 'gl' }, `${slot}. ${a.captain} v ${b.captain}`),
         winSel,
-        h('div', { class: 'field', style: 'padding:0;gap:6px' }, h('label', { text: a.captain }), beers[a.id], h('label', { text: b.captain }), beers[b.id]),
+        beersBox,
         save);
     });
-    return h('div', { class: 'subform' }, h('h3', { text: 'Games (round robin · winner + beers 0.5)' }), ...rows);
+    return h('div', { class: 'subform' }, h('h3', { text: 'Games (round robin · winner 2 🍺 · loser ≤1.5)' }), ...rows);
   }
 
   function volleyballSetsSubform() {

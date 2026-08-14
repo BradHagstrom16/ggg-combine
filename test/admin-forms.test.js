@@ -19,6 +19,7 @@ import {
   teamShapeFor,
   availableForDraft,
   buildDraftTeams,
+  assignFromTeams,
   burnTracker,
   burnChooser,
   finalizeNudges,
@@ -78,6 +79,42 @@ test('buildDraftTeams pins a playing captain to their own team — never onto tw
   assert.ok(murph.members.includes('Lucas')); // a non-captain member still goes where assigned
   assert.ok(stu.members.includes('Josh'));
   assert.deepEqual(teams.map((t) => t.captain), ['Murph', 'Stu']); // each captain leads their own team
+});
+
+test('assignFromTeams recovers each member\'s team, keyed by captain (inverse of buildDraftTeams)', () => {
+  const teamIdFor = (c) => `beerball-${c}`;
+  const teams = [
+    { id: 'beerball-Tyler', captain: 'Tyler', members: ['Mitch', 'Helwig'] }, // non-playing captain
+    { id: 'beerball-Yuyi', captain: 'Yuyi', members: ['Yuyi', 'Murph'] },
+    { id: 'beerball-Lucas', captain: 'Lucas', members: ['Lucas', 'Wyatt'] },
+  ];
+  const assign = assignFromTeams(teams, teamIdFor);
+  assert.equal(assign.Mitch, 'beerball-Tyler'); // a non-captain member → its team
+  assert.equal(assign.Helwig, 'beerball-Tyler');
+  assert.equal(assign.Murph, 'beerball-Yuyi');
+  assert.equal(assign.Wyatt, 'beerball-Lucas');
+  assert.equal(assign.Yuyi, 'beerball-Yuyi'); // a playing captain → their own team
+  assert.equal(assign.Lucas, 'beerball-Lucas');
+});
+
+test('assignFromTeams round-trips buildDraftTeams for every non-captain member', () => {
+  const captains = captainsFor('volleyball'); // ['Mitch','Helwig','Wyatt']
+  const parts = participantsFor('volleyball');
+  const teamIdFor = (c) => `volleyball-${c}`;
+  const assign = {
+    Stu: 'volleyball-Mitch', Josh: 'volleyball-Mitch', Brad: 'volleyball-Mitch',
+    Yuyi: 'volleyball-Helwig', ATM: 'volleyball-Helwig',
+    Murph: 'volleyball-Wyatt', Lucas: 'volleyball-Wyatt',
+  };
+  const teams = buildDraftTeams(captains, parts, assign, teamIdFor);
+  const recovered = assignFromTeams(teams, teamIdFor);
+  for (const p of Object.keys(assign)) assert.equal(recovered[p], assign[p], `${p} recovered`);
+});
+
+test('assignFromTeams tolerates missing / empty / member-less input', () => {
+  assert.deepEqual(assignFromTeams(null, (c) => c), {});
+  assert.deepEqual(assignFromTeams([], (c) => c), {});
+  assert.deepEqual(assignFromTeams([{ captain: 'X' }], (c) => `t-${c}`), {}); // no members → nothing
 });
 
 test('burnTracker: count, filled vs open slots, straight off the ledger', () => {
