@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Events · GGG Combine 2026</title>
+<link rel="icon" href="/logo.png">
+<link rel="stylesheet" href="/combine.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="/">
+    <img class="brand-logo" src="/logo.png" alt="">
+    <span class="brand-name">GGG Combine <b>2026</b></span>
+  </a>
+  <nav class="site-nav">
+    <a href="/">Standings</a>
+    <a href="/agenda">Agenda</a>
+    <a href="/events" aria-current="page">Events</a>
+    <a href="/rules">Rules</a>
+    <a class="admin-link" href="/admin">Commissioner</a>
+  </nav>
+</header>
+
+<main class="board-wrap">
+  <div class="board-head">
+    <div class="board-title">
+      <h1>GGG Combine <b>2026</b></h1>
+      <div class="board-sub" id="subtitle">Connecting…</div>
+    </div>
+    <div class="chips">
+      <span class="chip knob" id="knob">INDIVIDUAL ×1.1</span>
+      <span class="age" id="age"></span>
+    </div>
+  </div>
+
+  <nav class="seg" id="seg">
+    <a href="#" data-view="events">By event</a>
+    <a href="#players" data-view="players">By player</a>
+  </nav>
+
+  <div class="issues-bar" id="issues" hidden></div>
+  <div id="view"><p class="muted">Loading…</p></div>
+</main>
+
+<script type="module">
+  // Everything on this page is DERIVED from the log on each poll: raw entries → effectiveLog →
+  // score() → view-models (src/events-view.js) → DOM. Nothing computed is stored. sync.js keeps
+  // the last-good log fresh; a wifi blip keeps the last render on screen with an amber age stamp.
+  import { effectiveLog, score, movementSinceLastEvent } from '/src/scoring.js';
+  import {
+    formatCellPoints, formatTotal, movementArrow, knobChipText, ageLabel,
+    progressSubtitle, issueSummary, issueText,
+  } from '/src/render.js';
+  import { startSync } from '/src/sync.js';
+  import {
+    eventsByDay, eventHeadline, beerballBoard, volleyballBoard, wiffleBoard,
+    individualBoard, playerBreakdown,
+  } from '/src/events-view.js';
+
+  if (new URLSearchParams(location.search).has('tv')) document.body.classList.add('tv');
+
+  /* ---- tiny DOM helper (same shape as admin.html's) ---- */
+  function h(tag, props = {}, ...kids) {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (k === 'class') node.className = v;
+      else if (k === 'text') node.textContent = v;
+      else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
+      else if (v === true) node.setAttribute(k, '');
+      else if (v !== false && v != null) node.setAttribute(k, v);
+    }
+    for (const kid of kids.flat()) {
+      if (kid == null) continue;
+      node.appendChild(typeof kid === 'string' || typeof kid === 'number'
+        ? document.createTextNode(String(kid)) : kid);
+    }
+    return node;
+  }
+
+  const viewEl = document.getElementById('view');
+  const subtitleEl = document.getElementById('subtitle');
+  const knobEl = document.getElementById('knob');
+  const ageEl = document.getElementById('age');
+  const issuesEl = document.getElementById('issues');
+  const segEl = document.getElementById('seg');
+
+  let lastResult = null;
+  let lastMovement = {};
+  let lastView = null;
+  let lastViewAt = null;
+
+  /* ---- small formatters ---- */
+  const ordinal = (n) => {
+    if (n == null) return '—';
+    const s = ['th', 'st', 'nd', 'rd']; const v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  };
+  const diffStr = (d) => {
+    const n = Number(d); const s = Number.isInteger(n) ? String(n) : n.toFixed(1);
+    return n > 0 ? `+${s}` : s;
+  };
+  const fmtBeers = (b) => (b == null ? '?' : String(b));
+  const fmtVal = (v) => (v == null ? '—' : String(v));
+  const playerLink = (name) => h('a', { class: 'plink', href: `#player=${encodeURIComponent(name)}` }, name);
+  const memberLinks = (members) => {
+    const out = [];
+    (members || []).forEach((m, i) => { if (i) out.push(', '); out.push(playerLink(m)); });
+    return out;
+  };
+
+  /* ---- BY EVENT ---- */
+  function teamRoster(id, result) {
+    const ev = result.events[id];
+    const winnerId = id === 'wiffle' ? ev.winner : null;
+    const row = h('div', { class: 'teamrow' });
+    for (const t of ev.teams || []) {
+      row.appendChild(h('div', { class: `team-chip${winnerId && t.id === winnerId ? ' win' : ''}` },
+        h('b', {}, `Team ${t.captain}`), ' · ', ...memberLinks(t.members)));
+    }
+    return h('div', {}, h('h4', {}, 'Teams'), row);
+  }
+
+  function beerballResults(result) {
+    const { games, standings } = beerballBoard(result);
+    const wrap = h('div', { class: 'res' });
+    if (!games.length) { wrap.appendChild(h('p', { class: 'muted', style: 'font-size:13px' }, 'No games played yet.')); return wrap; }
+    wrap.appendChild(h('h4', {}, 'Standings'));
+    const tb = h('table', { class: 'tbl' },
+      h('tr', {}, h('th', { class: 'l' }, '#'), h('th', { class: 'l' }, 'Pair'), h('th', {}, 'W'), h('th', {}, 'Diff'), h('th', {}, 'Pts')));
+    standings.forEach((s, i) => tb.appendChild(h('tr', { class: s.position === 1 ? 'win' : '' },
+      h('td', { class: 'place' }, s.position ?? (i + 1)),
+      h('td', { class: 'l' }, h('b', {}, `Team ${s.captain}`), h('span', { class: 'sub' }, (s.members || []).join(', '))),
+      h('td', {}, String(s.wins)),
+      h('td', {}, diffStr(s.beerDiff)),
+      h('td', { class: 'pts' }, s.points == null ? '—' : formatCellPoints(s.points)))));
+    wrap.appendChild(tb);
+    wrap.appendChild(h('h4', {}, `Games (${games.length}/10)`));
+    const g = h('div', { class: 'games' });
+    for (const gm of games) {
+      g.appendChild(h('div', { class: 'game-line' },
+        h('span', {}, h('b', {}, gm.winner), ` def. ${gm.loser}`),
+        h('span', { class: 'bx' }, `${fmtBeers(gm.winnerBeers)}–${fmtBeers(gm.loserBeers)} 🍺`)));
+    }
+    wrap.appendChild(g);
+    return wrap;
+  }
+
+  function wiffleResults(result) {
+    const { winner, decided } = wiffleBoard(result);
+    return h('div', { class: 'res' }, decided
+      ? h('div', { class: 'winbanner' }, `Team ${winner.captain} won · 100 pts`)
+      : h('div', { class: 'winbanner tbd' }, 'Not played yet'));
+  }
+
+  function volleyballResults(result) {
+    const { matches, standings } = volleyballBoard(result);
+    const wrap = h('div', { class: 'res' });
+    if (!matches.length) { wrap.appendChild(h('p', { class: 'muted', style: 'font-size:13px' }, 'No sets played yet.')); return wrap; }
+    wrap.appendChild(h('h4', {}, 'Standings'));
+    const tb = h('table', { class: 'tbl' },
+      h('tr', {}, h('th', { class: 'l' }, '#'), h('th', { class: 'l' }, 'Team'), h('th', {}, 'Pts')));
+    standings.forEach((s) => tb.appendChild(h('tr', { class: s.position === 1 ? 'win' : '' },
+      h('td', { class: 'place' }, s.position ?? '—'),
+      h('td', { class: 'l' }, h('b', {}, `Team ${s.captain}`)),
+      h('td', { class: 'pts' }, s.points == null ? '—' : formatCellPoints(s.points)))));
+    wrap.appendChild(tb);
+    wrap.appendChild(h('h4', {}, 'Matches'));
+    for (const m of matches) {
+      const loser = m.winner === m.a ? m.b : m.a;
+      const setsStr = m.sets.map((s) => `${s.a}–${s.b}`).join(', ');
+      wrap.appendChild(h('div', { class: 'match' },
+        h('div', { class: 'mh' },
+          h('span', {}, m.winner ? [h('b', {}, `Team ${m.winner}`), ` def. Team ${loser}`] : `Team ${m.a} v Team ${m.b}`),
+          h('span', {}, m.winner ? `${Math.max(m.setWins.a, m.setWins.b)}–${Math.min(m.setWins.a, m.setWins.b)}` : '')),
+        h('div', { class: 'sets' }, `${m.a} vs ${m.b}: ${setsStr || '—'}`)));
+    }
+    return wrap;
+  }
+
+  function individualResults(result, id) {
+    const { rows, unit } = individualBoard(result, id);
+    const wrap = h('div', { class: 'res' });
+    const dirTxt = unit === 'points' ? 'points, higher better' : `${unit || 'time'}, lower better`;
+    wrap.appendChild(h('h4', {}, `Leaderboard · ${dirTxt}`));
+    if (!rows.some((r) => !r.pending)) { wrap.appendChild(h('p', { class: 'muted', style: 'font-size:13px' }, 'Not started yet.')); return wrap; }
+    const tb = h('table', { class: 'tbl' },
+      h('tr', {}, h('th', { class: 'l' }, '#'), h('th', { class: 'l' }, 'Player'), h('th', {}, unit === 'points' ? 'Score' : 'Time'), h('th', {}, 'Pts')));
+    for (const r of rows) {
+      tb.appendChild(h('tr', { class: r.placement === 1 ? 'win' : '' },
+        h('td', { class: 'place' }, r.pending ? '—' : (r.placement ?? '—')),
+        h('td', { class: 'l' }, playerLink(r.player)),
+        r.pending ? h('td', { class: 'pend' }, 'pending') : h('td', {}, fmtVal(r.value)),
+        h('td', { class: 'pts' }, r.points == null ? '—' : formatCellPoints(r.points))));
+    }
+    wrap.appendChild(tb);
+    return wrap;
+  }
+
+  function eventCard(result, id) {
+    const hd = eventHeadline(result, id);
+    const body = h('div', { class: 'event-body' });
+    if (hd.overridden && hd.overrideReason) {
+      body.appendChild(h('p', { class: 'muted', style: 'font-size:12px;margin:2px 0' }, `⚑ Manual result: ${hd.overrideReason}`));
+    }
+    if (hd.type === 'team') body.appendChild(teamRoster(id, result));
+    if (id === 'beerball') body.appendChild(beerballResults(result));
+    else if (id === 'wiffle') body.appendChild(wiffleResults(result));
+    else if (id === 'volleyball') body.appendChild(volleyballResults(result));
+    else body.appendChild(individualResults(result, id));
+
+    const card = h('details', { class: 'event' },
+      h('summary', {}, h('span', { class: 'ev-short' }, hd.short), h('span', { class: `status-dot ${hd.state}` }, hd.statusLabel)),
+      body);
+    if (hd.started || ['final', 'unfinalized', 'manual'].includes(hd.state)) card.open = true;
+    return card;
+  }
+
+  function renderEvents(result) {
+    const box = h('div', {});
+    for (const g of eventsByDay()) {
+      box.appendChild(h('h2', { class: 'day-head' }, g.day));
+      for (const id of g.ids) box.appendChild(eventCard(result, id));
+    }
+    return box;
+  }
+
+  /* ---- BY PLAYER ---- */
+  function renderPlayersIndex(result) {
+    const box = h('div', {},
+      h('p', { class: 'muted', style: 'font-size:13px;margin:6px 0' }, 'Tap a player to see how they’re doing and where they’re scoring.'));
+    const list = h('div', { class: 'plist' });
+    for (const p of result.players) {
+      const mv = movementArrow(lastMovement[p.player]);
+      list.appendChild(h('a', { href: `#player=${encodeURIComponent(p.player)}` },
+        h('span', { class: 'pr' }, p.rankLabel),
+        h('span', { class: 'pn' }, p.player),
+        h('span', { class: `pm mv-${mv.dir}` }, mv.text),
+        h('span', { class: 'pt' }, formatTotal(p.totalRounded))));
+    }
+    box.appendChild(list);
+    return box;
+  }
+
+  function renderPlayerDetail(result, name) {
+    const b = playerBreakdown(result, lastMovement, name);
+    const wrap = h('div', { class: 'pdetail' }, h('a', { class: 'back', href: '#players' }, '‹ All players'));
+    if (!b) { wrap.appendChild(h('div', { class: 'notice error' }, `No player named “${name}”.`)); return wrap; }
+    const mv = movementArrow(b.movement);
+    wrap.appendChild(h('div', { class: 'player-hd' },
+      h('span', { class: 'nm' }, b.rank === 1 ? `${b.player} 👑` : b.player),
+      h('span', { class: 'rk' }, `${b.tied ? 'Tied ' : ''}${ordinal(b.rank)} place`),
+      h('span', { class: `pm mv-${mv.dir}` }, mv.text),
+      h('span', { class: 'tot' }, formatTotal(b.total))));
+    const tb = h('table', { class: 'tbl' },
+      h('tr', {}, h('th', { class: 'l' }, 'Event'), h('th', { class: 'l' }, 'Team'), h('th', {}, 'Place'), h('th', {}, 'Points')));
+    for (const r of b.rows) {
+      let ptsCell;
+      if (r.cell.kind === 'scored') ptsCell = h('td', { class: 'pts gain' }, r.cell.text);
+      else if (r.cell.kind === 'pending') ptsCell = h('td', { class: 'pend' }, 'pending');
+      else ptsCell = h('td', {}, '—');
+      tb.appendChild(h('tr', {},
+        h('td', { class: 'l' }, r.short),
+        h('td', { class: 'l' }, r.team ? `Team ${r.team}` : '—'),
+        h('td', {}, r.placement ?? '—'),
+        ptsCell));
+    }
+    wrap.appendChild(tb);
+    const scored = b.rows.filter((r) => r.cell.kind === 'scored');
+    if (scored.length) {
+      const best = scored.slice().sort((a, c) => Number(c.cell.text) - Number(a.cell.text))[0];
+      wrap.appendChild(h('p', { class: 'muted', style: 'font-size:13px;margin-top:10px' }, `Best event so far: ${best.short} (${best.cell.text} pts).`));
+    }
+    return wrap;
+  }
+
+  /* ---- routing + render ---- */
+  function route() {
+    const hash = location.hash.replace(/^#/, '');
+    if (hash === 'players') return { view: 'players' };
+    if (hash.startsWith('player=')) return { view: 'players', player: decodeURIComponent(hash.slice(7)) };
+    return { view: 'events' };
+  }
+
+  function renderCurrent() {
+    if (!lastResult) { viewEl.replaceChildren(h('p', { class: 'muted' }, 'Loading…')); return; }
+    const r = route();
+    [...segEl.querySelectorAll('a')].forEach((a) => a.classList.toggle('on', a.dataset.view === r.view));
+    let content;
+    if (r.view === 'players') content = r.player ? renderPlayerDetail(lastResult, r.player) : renderPlayersIndex(lastResult);
+    else content = renderEvents(lastResult);
+    viewEl.replaceChildren(content);
+  }
+
+  function renderFromEntries(entries) {
+    try {
+      const eff = effectiveLog(entries || []);
+      lastResult = score(eff);
+      lastMovement = movementSinceLastEvent(eff);
+      subtitleEl.textContent = progressSubtitle(lastResult);
+      knobEl.textContent = knobChipText(lastResult.knob);
+      const { errors } = issueSummary(lastResult.issues);
+      issuesEl.hidden = errors.length === 0;
+      issuesEl.textContent = errors.length ? `⚠ ${errors.map(issueText).join(' · ')}` : '';
+      renderCurrent();
+    } catch (e) {
+      viewEl.replaceChildren(h('div', { class: 'notice error' }, `Could not render — ${(e && e.message) || e}`));
+    }
+  }
+
+  function tickAge() {
+    if (!lastView) return;
+    if (!lastView.everLoaded) {
+      ageEl.textContent = lastView.stale ? 'offline — no cached board' : 'connecting…';
+      ageEl.classList.toggle('amber', !!lastView.stale);
+      return;
+    }
+    const extra = lastViewAt != null ? Date.now() - lastViewAt : 0;
+    const stamp = ageLabel((lastView.ageMs ?? 0) + extra);
+    ageEl.textContent = lastView.stale ? `${stamp.text} · reconnecting` : stamp.text;
+    ageEl.classList.toggle('amber', stamp.amber || lastView.amber);
+  }
+
+  const sync = startSync({
+    onData(view) {
+      lastView = view;
+      lastViewAt = Date.now();
+      renderFromEntries(view.entries);
+      tickAge();
+    },
+  });
+
+  // Re-render the current view instantly on tab switch (no recompute needed).
+  window.addEventListener('hashchange', renderCurrent);
+
+  // Paint the cached last-good log immediately, before the first network reply.
+  lastView = sync.getView();
+  lastViewAt = Date.now();
+  renderFromEntries(lastView.entries);
+  tickAge();
+
+  setInterval(tickAge, 1000);
+</script>
+</body>
+</html>
