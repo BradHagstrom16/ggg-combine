@@ -158,6 +158,37 @@ test('startSync.pollOnce: 200 populates, then threads ETag, 304 keeps data, erro
   assert.deepEqual(v3.entries, [{ id: 1 }]); // still the last good board
 });
 
+test('startSync.pollOnce serializes overlapping calls: one fetch, same result', async () => {
+  let fetched = 0;
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const sync = startSync({
+    fetchImpl: async () => {
+      fetched += 1;
+      await gate; // hold the first poll open so the second call overlaps it
+      return fakeResponse({ status: 200, body: { entries: [{ id: 1 }] }, etag: 'e' });
+    },
+    now: () => 1000,
+    storage: fakeStorage(),
+    isVisible: () => true,
+    schedule: () => () => {},
+    immediate: false,
+  });
+
+  const p1 = sync.pollOnce();
+  const p2 = sync.pollOnce(); // while p1 is still in flight
+  release();
+  const [v1, v2] = await Promise.all([p1, p2]);
+
+  assert.equal(fetched, 1); // the second call did NOT issue its own fetch
+  assert.deepEqual(v1.entries, [{ id: 1 }]);
+  assert.deepEqual(v2.entries, [{ id: 1 }]);
+
+  // Guard clears after settling — a later poll fetches again.
+  await sync.pollOnce();
+  assert.equal(fetched, 2);
+});
+
 test('startSync.pollOnce does not fetch while hidden', async () => {
   let fetched = 0;
   const sync = startSync({

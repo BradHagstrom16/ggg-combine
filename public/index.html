@@ -58,6 +58,7 @@
   const issuesEl = document.getElementById('issues');
 
   let lastView = null;
+  let lastViewAt = null; // local ms when lastView was received, so the age can advance between polls
 
   function renderFromEntries(entries) {
     const effective = effectiveLog(entries || []);
@@ -86,7 +87,10 @@
       ageEl.classList.toggle('amber', !!lastView.stale);
       return;
     }
-    const stamp = ageLabel(lastView.ageMs ?? 0);
+    // ageMs is fixed at receipt; add the local time elapsed since so the stamp climbs every tick
+    // (and crosses the 60s amber threshold) even while no new poll lands.
+    const extra = lastViewAt != null ? Date.now() - lastViewAt : 0;
+    const stamp = ageLabel((lastView.ageMs ?? 0) + extra);
     ageEl.textContent = lastView.stale ? `${stamp.text} · reconnecting` : stamp.text;
     ageEl.classList.toggle('amber', stamp.amber || lastView.amber);
   }
@@ -94,6 +98,7 @@
   const sync = startSync({
     onData(view) {
       lastView = view;
+      lastViewAt = Date.now();
       renderFromEntries(view.entries);
       tickAge();
     },
@@ -101,6 +106,7 @@
 
   // Render the cached last-good board instantly (before the first network reply resolves).
   lastView = sync.getView();
+  lastViewAt = Date.now();
   renderFromEntries(lastView.entries);
   tickAge();
 

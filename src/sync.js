@@ -134,19 +134,29 @@ export function startSync(deps = {}) {
       const id = setInterval(fn, ms);
       return () => clearInterval(id);
     },
+    fetchTimeoutMs = POLL_MS,
     immediate = true,
   } = deps;
 
   let state = createSyncState(storage ? loadCache(storage, key) : { ...EMPTY_CACHE });
   state = setVisible(state, isVisible());
+  let inFlight = null;
 
-  async function pollOnce() {
+  function fetchOptions() {
+    const opts = { headers: requestHeaders(state), cache: 'no-store' };
+    // Bound the request so a stalled socket settles through the error path instead of hanging — and,
+    // with the in-flight guard below, wedging every future poll behind one dead fetch.
+    if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) opts.signal = AbortSignal.timeout(fetchTimeoutMs);
+    return opts;
+  }
+
+  async function doPoll() {
     state = setVisible(state, isVisible());
     if (!shouldPoll(state)) return syncView(state, now());
 
     let resp;
     try {
-      const res = await fetchImpl(url, { headers: requestHeaders(state), cache: 'no-store' });
+      const res = await fetchImpl(url, fetchOptions());
       if (res.status === 304) {
         resp = { kind: 'notModified' };
       } else if (res.ok) {
@@ -164,6 +174,14 @@ export function startSync(deps = {}) {
     const view = syncView(state, now());
     onData(view);
     return view;
+  }
+
+  // Serialize overlapping calls (10s interval vs. visibilitychange vs. an admin refresh()): a second
+  // caller awaits the same in-flight poll rather than issuing a racing fetch that double-folds state.
+  function pollOnce() {
+    if (inFlight) return inFlight;
+    inFlight = doPoll();
+    return inFlight.finally(() => { inFlight = null; });
   }
 
   const cancelTimer = schedule(() => { pollOnce(); }, POLL_MS);

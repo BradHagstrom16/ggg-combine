@@ -36,6 +36,27 @@ export function availableForDraft(eventId, assigned = []) {
   return participantsFor(eventId).filter((p) => !taken.has(p));
 }
 
+/**
+ * Build the `draft_assignment` teams from the per-player assignment map. `assign` maps a
+ * participant to the team id they joined; `teamIdFor(captain)` yields a captain's own team id.
+ *
+ * A PLAYING captain is pinned to their own team and can never be assigned elsewhere — otherwise
+ * they'd be force-added to their own team AND land in another captain's filter, appearing on two
+ * teams. Non-captain members go where assigned; a non-playing captain leads a team but isn't a
+ * member of it.
+ */
+export function buildDraftTeams(captains, parts, assign, teamIdFor) {
+  const own = new Map(captains.map((c) => [c, teamIdFor(c)]));
+  const capSet = new Set(captains);
+  const teamIdOf = (p) => (capSet.has(p) ? own.get(p) : assign[p]);
+  return captains.map((c) => {
+    const id = own.get(c);
+    const members = parts.filter((p) => p !== c && teamIdOf(p) === id);
+    if (parts.includes(c)) members.unshift(c); // a playing captain leads their own team
+    return { id, captain: c, members };
+  });
+}
+
 /* ---- Burn tracker + chooser -------------------------------------------------------------- */
 
 /** The pinned "N of 5 burned" tracker: one entry per slot, in schedule order, straight off the ledger. */

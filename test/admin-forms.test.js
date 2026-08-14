@@ -18,6 +18,7 @@ import {
   captainsFor,
   teamShapeFor,
   availableForDraft,
+  buildDraftTeams,
   burnTracker,
   burnChooser,
   finalizeNudges,
@@ -57,6 +58,26 @@ test('availableForDraft offers only unassigned participants', () => {
   assert.ok(!left.includes('Murph'));
   assert.ok(!left.includes('Tyler'));
   assert.equal(left.length, ROSTER.length - 3);
+});
+
+test('buildDraftTeams pins a playing captain to their own team — never onto two', () => {
+  // Regression: a playing captain reassigned to another captain's team used to land on BOTH
+  // (force-added to their own + filtered onto the selected one). Wiffle captains Murph & Stu both play.
+  const captains = captainsFor('wiffle'); // ['Murph', 'Stu']
+  const parts = participantsFor('wiffle'); // ROSTER — both captains are participants
+  const teamIdFor = (c) => `wiffle-${c}`;
+  const assign = { Murph: 'wiffle-Stu', Stu: 'wiffle-Stu', Lucas: 'wiffle-Murph', Josh: 'wiffle-Stu' };
+
+  const teams = buildDraftTeams(captains, parts, assign, teamIdFor);
+  const murph = teams.find((t) => t.captain === 'Murph');
+  const stu = teams.find((t) => t.captain === 'Stu');
+
+  assert.equal(murph.members.filter((m) => m === 'Murph').length, 1); // on own team exactly once
+  assert.equal(murph.members[0], 'Murph'); // and leads it
+  assert.ok(!stu.members.includes('Murph')); // NOT on the team the select tried to move him to
+  assert.ok(murph.members.includes('Lucas')); // a non-captain member still goes where assigned
+  assert.ok(stu.members.includes('Josh'));
+  assert.deepEqual(teams.map((t) => t.captain), ['Murph', 'Stu']); // each captain leads their own team
 });
 
 test('burnTracker: count, filled vs open slots, straight off the ledger', () => {

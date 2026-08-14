@@ -65,7 +65,7 @@
   import { renderStandings } from '/src/render.js';
   import {
     burnTracker, burnChooser, finalizeNudges, knobRankPreview,
-    participantsFor, captainsFor, teamShapeFor,
+    participantsFor, captainsFor, teamShapeFor, buildDraftTeams,
   } from '/src/admin-forms.js';
   import { createOutbox } from '/src/outbox.js';
   import { startSync } from '/src/sync.js';
@@ -241,7 +241,7 @@
       ...recent.map((e) =>
         h('div', { class: 'undo-row' },
           h('span', { text: `#${e.id} ${entryLabel(e)}` }),
-          h('span', { class: 'u', role: 'button', onclick: () => submit({ type: 'correction', targets: e.id }, null), text: e.type === 'correction' ? 'redo' : 'undo' }))),
+          h('button', { class: 'u', type: 'button', onclick: () => submit({ type: 'correction', targets: e.id }, null), text: e.type === 'correction' ? 'redo' : 'undo' }))),
     );
   }
   function renderMiniBoard() {
@@ -290,10 +290,11 @@
     const assign = {};
     for (const c of captains) assign[c] = teamId(eventId, c); // captains default to their own team
     const rows = parts.map((p) => {
-      const sel = h('select', { onchange: (e) => { assign[p] = e.target.value; } },
+      const isCaptain = captains.includes(p);
+      const sel = h('select', { disabled: isCaptain || false, onchange: (e) => { assign[p] = e.target.value; } },
         h('option', { value: '' }, '—'),
         ...captains.map((c) => h('option', { value: teamId(eventId, c), selected: assign[p] === teamId(eventId, c) }, `Team ${c}`)));
-      return h('div', { class: 'field' }, h('label', { text: p }), sel);
+      return h('div', { class: 'field' }, h('label', { text: isCaptain ? `${p} (captain)` : p }), sel);
     });
     const hint = eventId === 'wiffle'
       ? h('p', { class: 'muted', style: 'font-size:12px' }, `${GM} is on the 6-player side. Sizes: 6 v 5.`)
@@ -301,12 +302,7 @@
       : h('p', { class: 'muted', style: 'font-size:12px' }, `${shape.teamCount} teams of ${shape.teamSize}.`);
     const save = h('button', { class: 'primary' }, `Save ${ev.short} draft`);
     save.addEventListener('click', () => {
-      const teams = captains.map((c) => {
-        const id = teamId(eventId, c);
-        const members = parts.filter((p) => assign[p] === id);
-        if (parts.includes(c) && !members.includes(c)) members.unshift(c); // playing captain is a member
-        return { id, captain: c, members };
-      });
+      const teams = buildDraftTeams(captains, parts, assign, (c) => teamId(eventId, c));
       submit({ type: 'draft_assignment', event: eventId, teams }, save);
     });
     return h('div', { class: 'subform' }, h('h3', { text: 'Draft' }), hint, ...rows, save);
@@ -325,17 +321,20 @@
     const save = h('button', { class: 'primary' }, `Save ${ev.short} ${ev.unit === 'points' ? 'scores' : 'times'}`);
     save.addEventListener('click', async () => {
       save.disabled = true;
-      let sent = 0;
+      const outcomes = [];
       for (const p of parts) {
         const raw = inputs[p].value.trim();
         if (raw === '') continue; // blank = pending (or 0 after finalize) — not sent
         const value = Number(raw);
         if (!Number.isFinite(value)) continue;
         if (values[p] === value) continue; // unchanged — skip
-        await outbox.send({ type: 'time', event: eventId, player: p, value, uuid: uuid() });
-        sent += 1;
+        outcomes.push(await outbox.send({ type: 'time', event: eventId, player: p, value, uuid: uuid() }));
       }
-      toast(sent ? `Saved ${sent} ${ev.short} entr${sent === 1 ? 'y' : 'ies'}` : 'No changes', sent ? 'ok' : 'warn');
+      // Report the truth: 'ok' means the log has it, 'rejected' will never land, anything else queued.
+      if (outcomes.length === 0) toast('No changes', 'warn');
+      else if (outcomes.every((o) => o === 'ok')) toast(`Saved ${outcomes.length} ${ev.short} entr${outcomes.length === 1 ? 'y' : 'ies'}`, 'ok');
+      else if (outcomes.some((o) => o === 'rejected')) toast('Some entries rejected — check', 'error');
+      else toast('Offline — queued, will send on reconnect', 'warn');
       await refresh(true);
       save.disabled = false;
     });

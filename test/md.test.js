@@ -52,6 +52,15 @@ test('ordered list', () => {
   assert.match(html, /<ol><li>first<\/li><li>second<\/li><\/ol>/);
 });
 
+test('a dedent after an indented first item still emits every item', () => {
+  // The first item is more-indented than the second; both must render (no silent drop) and the
+  // paragraph after the list must not be swallowed.
+  const html = renderMarkdown('  - deep\n- shallow\n\nafter');
+  assert.match(html, /deep/);
+  assert.match(html, /shallow/);
+  assert.match(html, /<p>after<\/p>/);
+});
+
 test('fenced code block: escaped, and inline markers stay literal', () => {
   const html = renderMarkdown('```\nraw = 100 × (n − r)\n**not bold** <x>\n```');
   assert.match(html, /<pre><code>/);
@@ -105,6 +114,20 @@ test('HTML in the source text is escaped (no injection)', () => {
 
 test('links', () => {
   assert.match(renderMarkdown('[text](https://x.y/z)'), /<a href="https:\/\/x\.y\/z">text<\/a>/);
+});
+
+test('relative and #anchor links still render', () => {
+  assert.match(renderMarkdown('[a](#section)'), /<a href="#section">a<\/a>/);
+  assert.match(renderMarkdown('[a](../rules)'), /<a href="\.\.\/rules">a<\/a>/);
+  assert.match(renderMarkdown('[a](mailto:x@y.z)'), /<a href="mailto:x@y\.z">a<\/a>/);
+});
+
+test('javascript:/data: links are inert — label survives, no anchor', () => {
+  for (const url of ['javascript:alert(1)', 'JAVASCRIPT:alert(1)', 'data:text/html,<b>x', 'vbscript:x']) {
+    const html = renderMarkdown(`[click](${url})`);
+    assert.doesNotMatch(html, /<a /, `${url} must not become a link`);
+    assert.match(html, /click/); // the label is kept as plain text
+  }
 });
 
 test('renderMarkdown never throws and returns a string for odd input', () => {

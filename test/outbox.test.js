@@ -46,6 +46,27 @@ function scriptedPost(outcomes) {
 
 const entry = (uuid, type = 'time') => ({ uuid, type, value: uuid });
 
+/** A single-slot fake timer: at most one one-shot timer, fired on demand, with an arm counter. */
+function fakeTimers() {
+  const active = new Map(); // id -> { fn, delay }
+  let nextId = 1;
+  let armed = 0;
+  return {
+    set: (fn, delay) => { const id = nextId; nextId += 1; active.set(id, { fn, delay }); armed += 1; return id; },
+    clear: (id) => { active.delete(id); },
+    armedCount: () => armed,
+    activeCount: () => active.size,
+    pending: () => (active.size ? [...active.values()][0] : null),
+    fire: async () => {
+      const id = [...active.keys()][0];
+      if (id == null) return;
+      const { fn } = active.get(id);
+      active.delete(id); // a real one-shot timer is consumed when it fires
+      await fn();
+    },
+  };
+}
+
 test('enqueue appends and is idempotent by uuid', () => {
   let q = [];
   q = enqueue(q, entry('a'));
@@ -162,6 +183,90 @@ test('flush never double-sends: concurrent flushes post each entry once', async 
   await Promise.all([outbox.flush(), outbox.flush()]); // fire two at once
   assert.equal(post.calls.length, 2); // each queued entry posted exactly once
   assert.equal(outbox.count(), 0);
+});
+
+test('flush returns the in-flight drain promise so an overlapping caller awaits it (not undefined)', async () => {
+  const storage = fakeStorage();
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const outbox = createOutbox({ post: scriptedPost(['throw']), storage, key: 'k' });
+  await outbox.send(entry('a')); // queue one entry (autoRetry defaults off in Node — no timer)
+
+  outbox._setPost(async () => { await gate; return { status: 201 }; });
+  const f1 = outbox.flush();
+  const f2 = outbox.flush(); // overlaps the still-gated first drain
+  assert.equal(typeof f1.then, 'function'); // a real promise, not undefined
+  assert.equal(f1, f2); // the same in-flight drain is reused
+  release();
+  await Promise.all([f1, f2]);
+  assert.equal(outbox.count(), 0);
+});
+
+test('autoRetry: a queued entry auto-flushes on a backoff timer once the transport recovers', async () => {
+  const timers = fakeTimers();
+  const storage = fakeStorage();
+  const outbox = createOutbox({
+    post: scriptedPost(['throw']),
+    storage,
+    key: 'k',
+    autoRetry: true,
+    retryBaseMs: 2000,
+    setTimeoutImpl: timers.set,
+    clearTimeoutImpl: timers.clear,
+  });
+
+  await outbox.send(entry('a')); // throws → queued → a retry timer is armed
+  assert.equal(outbox.count(), 1);
+  assert.equal(timers.pending().delay, 2000);
+
+  outbox._setPost(scriptedPost([201])); // transport recovers WITHOUT any 'online' event
+  await timers.fire(); // the backoff timer fires flush()
+  assert.equal(outbox.count(), 0); // auto-drained
+  assert.equal(timers.activeCount(), 0); // no timer left once the queue is empty
+});
+
+test('autoRetry: backoff doubles (capped) while it keeps failing; only one timer is ever pending', async () => {
+  const timers = fakeTimers();
+  const outbox = createOutbox({
+    post: scriptedPost(['throw']), // always down
+    storage: fakeStorage(),
+    key: 'k',
+    autoRetry: true,
+    retryBaseMs: 1000,
+    retryMaxMs: 8000,
+    setTimeoutImpl: timers.set,
+    clearTimeoutImpl: timers.clear,
+  });
+
+  await outbox.send(entry('a'));
+  assert.equal(timers.pending().delay, 1000);
+  await timers.fire();
+  assert.equal(timers.pending().delay, 2000);
+  await timers.fire();
+  assert.equal(timers.pending().delay, 4000);
+  await timers.fire();
+  assert.equal(timers.pending().delay, 8000);
+  await timers.fire();
+  assert.equal(timers.pending().delay, 8000); // capped at retryMaxMs
+
+  // A second send while a timer is already pending must not arm a second timer.
+  const armedBefore = timers.armedCount();
+  await outbox.send(entry('b'));
+  assert.equal(timers.armedCount(), armedBefore);
+  assert.equal(timers.activeCount(), 1);
+});
+
+test('autoRetry stays off by default in a non-browser context (no timers armed)', async () => {
+  let armed = 0;
+  const outbox = createOutbox({
+    post: scriptedPost(['throw']),
+    storage: fakeStorage(),
+    key: 'k',
+    setTimeoutImpl: () => { armed += 1; return 1; },
+  });
+  await outbox.send(entry('a'));
+  assert.equal(outbox.count(), 1);
+  assert.equal(armed, 0); // autoRetry defaults to autoFlushOnline (false under node) — no timer
 });
 
 test('a permanent rejection during flush drops that entry and continues', async () => {

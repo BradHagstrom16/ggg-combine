@@ -23,6 +23,17 @@ function escapeHtml(s) {
 }
 
 /**
+ * Gate a link href. A relative path, bare fragment (#…), or anything with no scheme is safe; a URL
+ * that DOES carry a scheme is allowed only for http(s)/mailto. Returns the url when safe, else null
+ * so the caller can drop the link to plain text. javascript:/data:/vbscript: therefore never link.
+ */
+function safeUrl(url) {
+  const scheme = /^\s*([a-z][a-z0-9+.-]*):/i.exec(url);
+  if (!scheme) return url; // relative, ./…, ../…, #anchor — no scheme, safe
+  return /^(https?|mailto)$/i.test(scheme[1]) ? url : null;
+}
+
+/**
  * Inline pass. Code spans are pulled out first (so their contents are escaped but never treated
  * as bold/italic/link markup), then the remaining text is escaped, then links and emphasis are
  * applied, then the code spans are spliced back in.
@@ -36,8 +47,14 @@ function renderInline(text) {
 
   s = escapeHtml(s);
 
-  // Links: [text](url). The url was escaped above, which is what we want inside href="".
-  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, url) => `<a href="${url}">${label}</a>`);
+  // Links: [text](url). The url was escaped above, which is what we want inside href="". A link
+  // whose scheme isn't http(s)/mailto (notably javascript:/data:) survives escaping untouched and
+  // would execute on click, so it's rejected to plain text — the file's "no future edit turns into
+  // live DOM" invariant (see header) covers link hrefs, not just markup.
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, url) => {
+    const safe = safeUrl(url);
+    return safe ? `<a href="${safe}">${label}</a>` : label;
+  });
 
   // Bold before italic so ** is consumed before a lone * can match.
   s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -144,7 +161,13 @@ function parseList(lines, start) {
     html += `</${tag}>`;
     return html;
   }
-  return { html: build(items[0].indent), next: i };
+  // Drain every collected item. build() consumes one list nested at `base`; if a later item is LESS
+  // indented than the first (a dedent build() can't reach), loop so it still emits — otherwise those
+  // items would be silently dropped while `next` skips past their lines. Well-formed nesting runs the
+  // loop exactly once (items[0] is the minimum indent).
+  let html = '';
+  while (idx < items.length) html += build(items[idx].indent);
+  return { html, next: i };
 }
 
 export function renderMarkdown(src) {
