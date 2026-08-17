@@ -54,12 +54,12 @@ test('eventHeadline: final / awaiting-finalize / in-progress / not-started', () 
 test('beerballBoard: game-by-game who-beat-whom + wins/differential standings, engine-ordered', () => {
   const { games, standings } = beerballBoard(golden());
   assert.equal(games.length, 10);
-  // slot 1: P1 (Yuyi) beats P2 (Lucas), winner finished 4, loser 2 (golden values)
+  // slot 1: P1 (Yuyi) beats P2 (Lucas). Spec §4.2: winner finishes 2, loser ≤1.5 (golden values).
   const g1 = games.find((g) => g.slot === 1);
   assert.equal(g1.winner, 'Yuyi');
   assert.equal(g1.loser, 'Lucas');
-  assert.equal(g1.winnerBeers, 4);
-  assert.equal(g1.loserBeers, 2);
+  assert.equal(g1.winnerBeers, 2);
+  assert.equal(g1.loserBeers, 0);
 
   // standings follow the resolved placement P1..P5 → Yuyi, Lucas, Josh, ATM, Tyler
   assert.deepEqual(standings.map((s) => s.captain), ['Yuyi', 'Lucas', 'Josh', 'ATM', 'Tyler']);
