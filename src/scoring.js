@@ -344,7 +344,7 @@ function beerballStats(teams, games) {
   return { stats, headToHeadWins, valid, bad };
 }
 
-/** Group volleyball sets into matches and decide each one (best of 3, spec + Brad 2026-08-13). */
+/** Group volleyball sets into matches and decide each one (best of 3, spec §4.5). */
 function volleyballMatches(sets) {
   const byMatch = new Map();
   for (const set of sets) {
@@ -376,7 +376,7 @@ function volleyballMatches(sets) {
       matchSlot, sets: ordered, setWins, teams: [...teamIds],
       winner: decided ? top[0] : null,
       // Flagged, never truncated: point differential sums margins across ALL sets played
-      // (Brad, 2026-08-13), so dropping the extra set would quietly change a rule.
+      // (spec §4.5), so dropping the extra set would quietly change a rule.
       extraSets: ordered.length > EVENTS.volleyball.maxSets,
     });
   }

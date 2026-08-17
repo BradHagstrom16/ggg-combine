@@ -85,6 +85,7 @@ final_points = raw_points × knob
 ### 4.5 Volleyball — after Bags
 - 10 able players in **3 teams (4 / 3 / 3)**. Played 3-on-3; the 4-player team rotates a sitter each set.
 - Round robin (each team plays each other team).
+- **Each match is best of 3 sets** (Brad, 2026-08-17): a team wins the match by taking 2 sets, so a sweep is 2 sets and a split goes to a 3rd. A match sitting 2–2 (an extra set logged) is undecided and stays pending. **Point differential sums the set margins across every set played**, including a set played after the match was already decided.
 - Standings: **wins → point differential → total points**; ties beyond that are broken by a play-in at Brad's discretion (allow a manual override — see §8).
 - Placement points: **100 / 50 / 0** to each team member.
 - Captains: **Mitch, Helwig, Wyatt**. Tyler backs a team (§6).
