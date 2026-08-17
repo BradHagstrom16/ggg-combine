@@ -19,6 +19,11 @@ compatibility_date = "2026-08-13"
 [assets]
 directory = "./public"
 run_worker_first = ["/log", "/log/*"]
+# Pin the extensionless-nav behavior explicitly. Every page links to /agenda, /events, /rules,
+# /admin (no .html), and the worker 404s anything but /log, so these are served entirely by the
+# asset router mapping /agenda -> agenda.html. That mapping is Cloudflare's DEFAULT, but leaving
+# it implicit means a future default change (or html_handling = "none") would 404 all nav. Pin it.
+html_handling = "auto-trailing-slash"
 
 # The append-only entry log lives in ONE Durable Object instance (name: "log").
 # Durable Objects are strongly consistent, so a write is visible to the next read.
