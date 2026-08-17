@@ -134,11 +134,18 @@ function el(tag, className, text) {
  * Contains no scoring logic — it only lays out what the pure helpers describe. Guarded so a
  * malformed result degrades to an empty-but-standing table rather than throwing (score() never
  * throws; neither should its renderer).
+ *
+ * The write is ATOMIC: the whole board is built into a detached fragment and swapped into `root`
+ * in one move at the end. So if any step below still throws (a malformed result that slipped
+ * score()'s guards), `root` is never touched — the last-good board stays on the TV and the
+ * caller's catch only adds an error chip beside it, instead of blanking a projector no one can fix
+ * mid-event.
  */
 export function renderStandings(root, result, movement = {}, opts = {}) {
-  root.textContent = '';
+  const frag = document.createDocumentFragment();
   if (!result || !Array.isArray(result.players)) {
-    root.appendChild(el('p', 'muted', 'No standings yet.'));
+    frag.appendChild(el('p', 'muted', 'No standings yet.'));
+    root.replaceChildren(frag);
     return;
   }
 
@@ -218,9 +225,10 @@ export function renderStandings(root, result, movement = {}, opts = {}) {
   }
 
   table.appendChild(tbody);
-  root.appendChild(table);
+  frag.appendChild(table);
 
-  if (opts.legend !== false) root.appendChild(buildLegend(result));
+  if (opts.legend !== false) frag.appendChild(buildLegend(result));
+  root.replaceChildren(frag); // single mutation of the live node — reached only on success
 }
 
 function buildLegend(result) {
