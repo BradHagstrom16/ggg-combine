@@ -1483,3 +1483,35 @@ describe('malformed beerball_game degrades, never throws (bad-beerball-entry)', 
     assert.ok(codes(result).includes('bad-beerball-entry'));
   });
 });
+
+// =======================================================================================
+// Overrides always win (spec §8), but a roster mismatch is surfaced, not silently applied
+// =======================================================================================
+
+describe('override roster mismatch is warned, never silently applied', () => {
+  test('an override that names an unknown competitor still applies but warns', () => {
+    // Fat-finger one name ('Helwigg'), which also drops the real Helwig. §8 says the override
+    // wins regardless, but a typo that zeroes a real player must not pass silently.
+    const log = buildLog([
+      { type: 'knob', value: 1.1 },
+      { type: 'override', event: 'swim', reason: 'scorekeeping redo',
+        placements: ['Lucas', 'Wyatt', 'Murph', 'Stu', 'Mitch', 'Yuyi', 'ATM', 'Josh', 'Brad', 'Helwigg'] },
+      { type: 'event_final', event: 'swim' },
+    ]);
+    const result = run(log);
+    assert.equal(result.events.swim.overridden, true, 'the override still wins');
+    assert.ok(codes(result).includes('override-roster-mismatch'));
+  });
+
+  test('a correct override applies with no roster warning', () => {
+    const log = buildLog([
+      { type: 'knob', value: 1.1 },
+      { type: 'override', event: 'swim', reason: 'redo',
+        placements: ['Lucas', 'Wyatt', 'Murph', 'Stu', 'Mitch', 'Yuyi', 'ATM', 'Josh', 'Brad', 'Helwig'] },
+      { type: 'event_final', event: 'swim' },
+    ]);
+    const result = run(log);
+    assert.equal(result.events.swim.overridden, true);
+    assert.ok(!codes(result).includes('override-roster-mismatch'));
+  });
+});

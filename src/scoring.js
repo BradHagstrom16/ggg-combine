@@ -681,18 +681,37 @@ function validateDrafts(teamsByEvent, addIssue) {
  * throw — permanently, since the log is append-only. Treated as absent instead: the event scores
  * normally if it can and renders pending if it cannot, with the bad entry named.
  */
-function usableOverride(override, eventId, addIssue) {
-  if (!override || Array.isArray(override.placements)) return override ?? null;
-  addIssue('error', 'bad-override',
-    `${EVENTS[eventId].label} override (entry ${override.id}) has no placements list — it is ignored and the event scores normally. Re-enter it.`,
-    { event: eventId, entryId: override.id });
-  return null;
+function usableOverride(override, eventId, addIssue, validIds) {
+  if (!override) return null;
+  if (!Array.isArray(override.placements)) {
+    addIssue('error', 'bad-override',
+      `${EVENTS[eventId].label} override (entry ${override.id}) has no placements list — it is ignored and the event scores normally. Re-enter it.`,
+      { event: eventId, entryId: override.id });
+    return null;
+  }
+  // An override always wins (spec §8), but a placements list that names a competitor not in the
+  // event or omits one that is is almost always a typo — and it silently zeroes the omitted player
+  // or awards a phantom. Surface it as a warning; the override is still applied.
+  if (Array.isArray(validIds) && validIds.length) {
+    const valid = new Set(validIds);
+    const unknown = override.placements.filter((id) => !valid.has(id));
+    const missing = validIds.filter((id) => !override.placements.includes(id));
+    if (unknown.length || missing.length) {
+      const parts = [];
+      if (unknown.length) parts.push(`names ${unknown.join(', ')} (not in this event)`);
+      if (missing.length) parts.push(`omits ${missing.join(', ')}`);
+      addIssue('warn', 'override-roster-mismatch',
+        `${EVENTS[eventId].label} override (entry ${override.id}) ${parts.join(' and ')} — it is still applied; double-check the order.`,
+        { event: eventId, entryId: override.id });
+    }
+  }
+  return override;
 }
 
 function scoreIndividualEvent(eventId, { latest, effective, knob, addIssue }) {
   const config = EVENTS[eventId];
   const finalized = latest.has(`event_final:${eventId}`);
-  const override = usableOverride(latest.get(`override:${eventId}`), eventId, addIssue);
+  const override = usableOverride(latest.get(`override:${eventId}`), eventId, addIssue, config.participants);
 
   const values = {};
   for (const player of config.participants) {
@@ -757,7 +776,8 @@ function scoreIndividualEvent(eventId, { latest, effective, knob, addIssue }) {
 function scoreTeamEvent(eventId, { latest, effective, teams, addIssue }) {
   const config = EVENTS[eventId];
   const finalized = latest.has(`event_final:${eventId}`);
-  const override = usableOverride(latest.get(`override:${eventId}`), eventId, addIssue);
+  const override = usableOverride(latest.get(`override:${eventId}`), eventId, addIssue,
+    teams && teams.length ? teams.map((t) => t.id) : null);
 
   const base = {
     id: eventId, label: config.label, short: config.short, order: config.order,
