@@ -1422,3 +1422,64 @@ describe('golf is an exhibition', () => {
     assert.deepEqual(totals(run(log)), EXPECTED.totals);
   });
 });
+
+// =======================================================================================
+// A malformed beerball_game must never crash the board (score() never throws)
+// =======================================================================================
+
+describe('malformed beerball_game degrades, never throws (bad-beerball-entry)', () => {
+  // A beerball_game reaches the permanent log through the Worker's type-only validation, so a
+  // partial or corrupt one — a fat-fingered entry, a half-flushed offline outbox, a bulk load —
+  // can and will land there. score() must degrade to a loud issue and keep the whole board
+  // alive; a throw would black out standings, the TV, and admin for the rest of the weekend
+  // (CLAUDE.md "score() must never throw").
+
+  test('a game with no pairs is ignored, not fatal', () => {
+    const log = append(GOLDEN_LOG, [{ type: 'beerball_game', event: 'beerball', gameSlot: 11 }]);
+    let result;
+    assert.doesNotThrow(() => { result = run(log); });
+    assert.equal(result.players.length, 11);
+    for (const p of result.players) assert.ok(Number.isFinite(p.total));
+    assert.ok(codes(result).includes('bad-beerball-entry'));
+  });
+
+  test('a pairs that is not an array is ignored, not fatal', () => {
+    const log = append(GOLDEN_LOG, [
+      { type: 'beerball_game', event: 'beerball', gameSlot: 12, pairs: 'P1 v P2', winner: 'P1' },
+    ]);
+    let result;
+    assert.doesNotThrow(() => { result = run(log); });
+    assert.equal(result.players.length, 11);
+    assert.ok(codes(result).includes('bad-beerball-entry'));
+  });
+
+  test('a winner who did not play the game earns no phantom win', () => {
+    // wins is Beer Ball's FIRST tiebreak (spec §4.2), so a valid-but-wrong winner id must not be
+    // credited — it could silently reorder standings and move the championship.
+    const log = buildLog([
+      { type: 'knob', value: 1.1 },
+      { type: 'draft_assignment', event: 'beerball', teams: BEERBALL_PAIRS },
+      { type: 'beerball_game', event: 'beerball', gameSlot: 1, pairs: ['P1', 'P2'], winner: 'P3', beers: { P1: 2, P2: 0 } },
+    ]);
+    let result;
+    assert.doesNotThrow(() => { result = run(log); });
+    const stats = result.events.beerball.ctx.stats;
+    assert.equal(stats.P3.wins, 0, 'the uninvolved pair got no win');
+    assert.equal(stats.P1.wins, 0, 'the typo winner is not silently reassigned');
+    assert.ok(codes(result).includes('bad-beerball-entry'));
+  });
+
+  test('non-numeric beers never poison the differential with NaN', () => {
+    const log = buildLog([
+      { type: 'knob', value: 1.1 },
+      { type: 'draft_assignment', event: 'beerball', teams: BEERBALL_PAIRS },
+      { type: 'beerball_game', event: 'beerball', gameSlot: 1, pairs: ['P1', 'P2'], winner: 'P1', beers: { P1: 2, P2: 'x' } },
+    ]);
+    let result;
+    assert.doesNotThrow(() => { result = run(log); });
+    const stats = result.events.beerball.ctx.stats;
+    assert.ok(Number.isFinite(stats.P1.beerDiff), 'P1 beerDiff stayed finite');
+    assert.ok(Number.isFinite(stats.P2.beerDiff), 'P2 beerDiff stayed finite');
+    assert.ok(codes(result).includes('bad-beerball-entry'));
+  });
+});
