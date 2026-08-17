@@ -227,9 +227,12 @@ table.standings { width: 100%; border-collapse: collapse; margin-top: 10px; }
 .standings td.is-unfinalized .pts::after { content: "*"; color: var(--warn); font-weight: 800; }
 
 /* Pin rank + movement + name (in that column order) while the event columns scroll on a narrow
-   phone. Offsets: rank 0, movement 48px (rank width), name 84px (rank 48 + movement 36). */
-.standings th.col-rank, .standings td.rank { position: sticky; left: 0; background: var(--bg); z-index: 1; }
-.standings th.col-move, .standings td.mv { position: sticky; left: 48px; background: var(--bg); z-index: 1; }
+   phone. Offsets: rank 0, movement 48px (rank width), name 84px (rank 48 + movement 36). The
+   min-widths are load-bearing, not cosmetic: the header cells for rank/move are empty and would
+   collapse, making the real column widths smaller than these offsets — so the name column, pinned
+   at 84px, would overhang and paint over the first event header ("WIFFLE" clipped to "IFFLE"). */
+.standings th.col-rank, .standings td.rank { position: sticky; left: 0; background: var(--bg); z-index: 1; min-width: 48px; }
+.standings th.col-move, .standings td.mv { position: sticky; left: 48px; background: var(--bg); z-index: 1; min-width: 36px; }
 .standings th.col-name, .standings td.name { position: sticky; left: 84px; background: var(--bg); z-index: 1; }
 .standings tr.leader td.rank, .standings tr.leader td.mv, .standings tr.leader td.name { background: #fff5f0; }
 

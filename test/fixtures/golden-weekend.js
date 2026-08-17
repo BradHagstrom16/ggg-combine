@@ -71,18 +71,23 @@ const VOLLEYBALL_TEAMS = [
   { id: 'TW', label: 'Team Wyatt', captain: 'Wyatt', members: ['Wyatt', 'Murph', 'Lucas'] },
 ];
 
-/** Full round robin: 5 pairs, 10 games, 4 each. P1 beats everyone, P2 beats all but P1, etc. */
+/**
+ * Full round robin: 5 pairs, 10 games, 4 each. P1 beats everyone, P2 beats all but P1, etc.
+ * Beers follow spec §4.2: the winner finishes exactly 2, the loser 1.5 or fewer (0.5 steps).
+ * Each game keeps the same beer *differential* it had before — standings rank on the differential
+ * (§4.2), so every EXPECTED number below is unchanged.
+ */
 const BEERBALL_GAMES = [
-  { gameSlot: 1, pairs: ['P1', 'P2'], winner: 'P1', beers: { P1: 4, P2: 2 } },
-  { gameSlot: 2, pairs: ['P1', 'P3'], winner: 'P1', beers: { P1: 4, P3: 2 } },
-  { gameSlot: 3, pairs: ['P1', 'P4'], winner: 'P1', beers: { P1: 4, P4: 2 } },
-  { gameSlot: 4, pairs: ['P1', 'P5'], winner: 'P1', beers: { P1: 4, P5: 2 } },
-  { gameSlot: 5, pairs: ['P2', 'P3'], winner: 'P2', beers: { P2: 4, P3: 2.5 } }, // 0.5 granularity, spec §10.5
-  { gameSlot: 6, pairs: ['P2', 'P4'], winner: 'P2', beers: { P2: 4, P4: 2 } },
-  { gameSlot: 7, pairs: ['P2', 'P5'], winner: 'P2', beers: { P2: 4, P5: 2 } },
-  { gameSlot: 8, pairs: ['P3', 'P4'], winner: 'P3', beers: { P3: 4, P4: 2 } },
-  { gameSlot: 9, pairs: ['P3', 'P5'], winner: 'P3', beers: { P3: 4, P5: 2 } },
-  { gameSlot: 10, pairs: ['P4', 'P5'], winner: 'P4', beers: { P4: 4, P5: 2 } },
+  { gameSlot: 1, pairs: ['P1', 'P2'], winner: 'P1', beers: { P1: 2, P2: 0 } },
+  { gameSlot: 2, pairs: ['P1', 'P3'], winner: 'P1', beers: { P1: 2, P3: 0 } },
+  { gameSlot: 3, pairs: ['P1', 'P4'], winner: 'P1', beers: { P1: 2, P4: 0 } },
+  { gameSlot: 4, pairs: ['P1', 'P5'], winner: 'P1', beers: { P1: 2, P5: 0 } },
+  { gameSlot: 5, pairs: ['P2', 'P3'], winner: 'P2', beers: { P2: 2, P3: 0.5 } }, // 0.5 granularity, spec §10.5
+  { gameSlot: 6, pairs: ['P2', 'P4'], winner: 'P2', beers: { P2: 2, P4: 0 } },
+  { gameSlot: 7, pairs: ['P2', 'P5'], winner: 'P2', beers: { P2: 2, P5: 0 } },
+  { gameSlot: 8, pairs: ['P3', 'P4'], winner: 'P3', beers: { P3: 2, P4: 0 } },
+  { gameSlot: 9, pairs: ['P3', 'P5'], winner: 'P3', beers: { P3: 2, P5: 0 } },
+  { gameSlot: 10, pairs: ['P4', 'P5'], winner: 'P4', beers: { P4: 2, P5: 0 } },
 ];
 
 const SWIM_TIMES = [

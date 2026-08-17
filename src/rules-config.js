@@ -136,8 +136,8 @@ export const EVENTS = {
     placementPoints: [100, 50, 0],
     teamCount: 3,
     teamSizes: [4, 3, 3],
-    // Brad, 2026-08-13: each of the 3 matchups is best of 3 sets; the match winner takes the
-    // standings "win"; point differential sums set margins across ALL sets played.
+    // Spec §4.5 (ruled by Brad): each of the 3 matchups is best of 3 sets; the match winner takes
+    // the standings "win"; point differential sums set margins across ALL sets played.
     matchCount: 3,
     setsToWin: 2,
     maxSets: 3,

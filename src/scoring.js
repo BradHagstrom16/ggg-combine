@@ -294,28 +294,57 @@ function beerballStats(teams, games) {
   const stats = {};
   for (const team of teams) stats[team.id] = { wins: 0, beerDiff: 0, played: 0 };
 
+  // A beerball_game reaches the permanent log through the Worker's type-only validation, so a
+  // malformed one — no pairing, a winner who never played, non-numeric beers — can and will land
+  // there (a fat-fingered entry, a half-flushed outbox, a bulk load). Mirror the bad-draft-entry
+  // degrade: skip what can't be trusted, collect it in `bad` for the caller to flag, and NEVER
+  // throw. A throw here would black out standings, the TV and admin for the rest of the weekend
+  // (CLAUDE.md "score() must never throw").
+  const valid = [];
+  const bad = [];
+
   for (const game of games) {
+    if (!Array.isArray(game.pairs) || game.pairs.length !== 2) {
+      bad.push({ gameSlot: game.gameSlot, id: game.id, reason: 'has no valid pairing' });
+      continue;
+    }
     const [a, b] = game.pairs;
-    if (!stats[a] || !stats[b]) continue;
+    if (!stats[a] || !stats[b]) continue; // pairing names a team not in this draft — pre-existing silent skip
+    valid.push(game);
     stats[a].played += 1;
     stats[b].played += 1;
-    if (stats[game.winner]) stats[game.winner].wins += 1;
+
+    // A win is credited only to a pair that actually played this game. wins is Beer Ball's first
+    // tiebreak (spec §4.2), so a valid-but-wrong winner id must never earn a phantom win.
+    if (game.winner === a || game.winner === b) {
+      stats[game.winner].wins += 1;
+    } else if (game.winner != null) {
+      bad.push({ gameSlot: game.gameSlot, id: game.id, reason: `names a winner (${game.winner}) who did not play it` });
+    }
+
+    // Non-finite beers must never reach the differential — it keys a tiebreak bucket, and one NaN
+    // would silently mis-partition the whole group (contrast the time path, which guards likewise).
     const beersA = Number(game.beers?.[a] ?? 0);
     const beersB = Number(game.beers?.[b] ?? 0);
-    stats[a].beerDiff += beersA - beersB;
-    stats[b].beerDiff += beersB - beersA;
+    if (Number.isFinite(beersA) && Number.isFinite(beersB)) {
+      stats[a].beerDiff += beersA - beersB;
+      stats[b].beerDiff += beersB - beersA;
+    } else {
+      bad.push({ gameSlot: game.gameSlot, id: game.id, reason: 'has non-numeric beers' });
+    }
   }
 
-  const headToHeadWins = (id, group) => games.reduce((wins, game) => {
+  // headToHeadWins walks only validated games, so its destructure is always safe.
+  const headToHeadWins = (id, group) => valid.reduce((wins, game) => {
     const [a, b] = game.pairs;
     const bothInGroup = group.includes(a) && group.includes(b);
     return bothInGroup && game.winner === id ? wins + 1 : wins;
   }, 0);
 
-  return { stats, headToHeadWins };
+  return { stats, headToHeadWins, valid, bad };
 }
 
-/** Group volleyball sets into matches and decide each one (best of 3, spec + Brad 2026-08-13). */
+/** Group volleyball sets into matches and decide each one (best of 3, spec §4.5). */
 function volleyballMatches(sets) {
   const byMatch = new Map();
   for (const set of sets) {
@@ -347,7 +376,7 @@ function volleyballMatches(sets) {
       matchSlot, sets: ordered, setWins, teams: [...teamIds],
       winner: decided ? top[0] : null,
       // Flagged, never truncated: point differential sums margins across ALL sets played
-      // (Brad, 2026-08-13), so dropping the extra set would quietly change a rule.
+      // (spec §4.5), so dropping the extra set would quietly change a rule.
       extraSets: ordered.length > EVENTS.volleyball.maxSets,
     });
   }
@@ -652,18 +681,37 @@ function validateDrafts(teamsByEvent, addIssue) {
  * throw — permanently, since the log is append-only. Treated as absent instead: the event scores
  * normally if it can and renders pending if it cannot, with the bad entry named.
  */
-function usableOverride(override, eventId, addIssue) {
-  if (!override || Array.isArray(override.placements)) return override ?? null;
-  addIssue('error', 'bad-override',
-    `${EVENTS[eventId].label} override (entry ${override.id}) has no placements list — it is ignored and the event scores normally. Re-enter it.`,
-    { event: eventId, entryId: override.id });
-  return null;
+function usableOverride(override, eventId, addIssue, validIds) {
+  if (!override) return null;
+  if (!Array.isArray(override.placements)) {
+    addIssue('error', 'bad-override',
+      `${EVENTS[eventId].label} override (entry ${override.id}) has no placements list — it is ignored and the event scores normally. Re-enter it.`,
+      { event: eventId, entryId: override.id });
+    return null;
+  }
+  // An override always wins (spec §8), but a placements list that names a competitor not in the
+  // event or omits one that is is almost always a typo — and it silently zeroes the omitted player
+  // or awards a phantom. Surface it as a warning; the override is still applied.
+  if (Array.isArray(validIds) && validIds.length) {
+    const valid = new Set(validIds);
+    const unknown = override.placements.filter((id) => !valid.has(id));
+    const missing = validIds.filter((id) => !override.placements.includes(id));
+    if (unknown.length || missing.length) {
+      const parts = [];
+      if (unknown.length) parts.push(`names ${unknown.join(', ')} (not in this event)`);
+      if (missing.length) parts.push(`omits ${missing.join(', ')}`);
+      addIssue('warn', 'override-roster-mismatch',
+        `${EVENTS[eventId].label} override (entry ${override.id}) ${parts.join(' and ')} — it is still applied; double-check the order.`,
+        { event: eventId, entryId: override.id });
+    }
+  }
+  return override;
 }
 
 function scoreIndividualEvent(eventId, { latest, effective, knob, addIssue }) {
   const config = EVENTS[eventId];
   const finalized = latest.has(`event_final:${eventId}`);
-  const override = usableOverride(latest.get(`override:${eventId}`), eventId, addIssue);
+  const override = usableOverride(latest.get(`override:${eventId}`), eventId, addIssue, config.participants);
 
   const values = {};
   for (const player of config.participants) {
@@ -728,7 +776,8 @@ function scoreIndividualEvent(eventId, { latest, effective, knob, addIssue }) {
 function scoreTeamEvent(eventId, { latest, effective, teams, addIssue }) {
   const config = EVENTS[eventId];
   const finalized = latest.has(`event_final:${eventId}`);
-  const override = usableOverride(latest.get(`override:${eventId}`), eventId, addIssue);
+  const override = usableOverride(latest.get(`override:${eventId}`), eventId, addIssue,
+    teams && teams.length ? teams.map((t) => t.id) : null);
 
   const base = {
     id: eventId, label: config.label, short: config.short, order: config.order,
@@ -755,6 +804,12 @@ function scoreTeamEvent(eventId, { latest, effective, teams, addIssue }) {
     addIssue('warn', 'too-many-sets',
       `${config.label} match ${match.matchSlot} has ${match.sets.length} sets logged; it is best of ${config.maxSets}. Check the set numbers.`,
       { event: eventId, matchSlot: match.matchSlot });
+  }
+
+  for (const bad of detail.badGames ?? []) {
+    addIssue('error', 'bad-beerball-entry',
+      `${config.label} game ${bad.gameSlot} (entry ${bad.id}) ${bad.reason} — it is ignored. Re-enter it.`,
+      { event: eventId, gameSlot: bad.gameSlot, entryId: bad.id });
   }
 
   const complete = detail.complete || Boolean(override);
@@ -822,10 +877,13 @@ function beerballDetail(effective, teams) {
     if (entry.type === 'beerball_game') bySlot.set(entry.gameSlot, entry);
   }
   const games = [...bySlot.values()].sort((a, b) => a.gameSlot - b.gameSlot);
-  const { stats, headToHeadWins } = beerballStats(teams, games);
+  const { stats, headToHeadWins, valid, bad } = beerballStats(teams, games);
   return {
-    games,
-    complete: games.length === config.gameCount,
+    // Only well-formed games are exposed to render/complete; malformed ones are flagged (below),
+    // never shown — this also keeps the events view from walking a bad game's missing `pairs`.
+    games: valid,
+    badGames: bad,
+    complete: valid.length === config.gameCount,
     ctx: { stats, headToHeadWins },
   };
 }
@@ -992,8 +1050,11 @@ function resolveChampionship(players, latest, addIssue) {
   let contenders = leaders;
   const comparable = leaders.every((l) => l.individualPlacements === INDIVIDUAL_EVENTS.length);
   if (comparable) {
-    const best = Math.min(...leaders.map((l) => l.avgIndividualPlacement));
-    const stillTied = leaders.filter((l) => l.avgIndividualPlacement === best);
+    // Compared at 1 decimal, matching the §7 total tie detection and round1's contract — float
+    // dust must never silently break a placement tie. (Placements are exact 0.5-grid today, so
+    // this is a no-op now; it stays correct if that ever changes.)
+    const best = Math.min(...leaders.map((l) => round1(l.avgIndividualPlacement)));
+    const stillTied = leaders.filter((l) => round1(l.avgIndividualPlacement) === best);
     if (stillTied.length === 1) {
       return {
         player: stillTied[0].player, resolvedBy: 'avgIndividualPlacement',

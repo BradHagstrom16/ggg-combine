@@ -154,9 +154,15 @@
   const sync = startSync({
     onData(view) {
       rawLog = view.entries || [];
-      effective = effectiveLog(rawLog);
-      scored = score(effective);
-      renderStatus();
+      // score()/render must never throw (CLAUDE.md). If a future malformed entry ever slipped the
+      // scorer guards, keep the admin usable and say so, rather than leaving Brad on a dead screen.
+      try {
+        effective = effectiveLog(rawLog);
+        scored = score(effective);
+        renderStatus();
+      } catch (e) {
+        toast(`Could not render standings — ${(e && e.message) || e}`, 'error');
+      }
     },
   });
 
@@ -549,10 +555,14 @@
   /* ---- boot ---- */
   if (!getPin()) requirePin();
   rawLog = sync.getView().entries;
-  effective = effectiveLog(rawLog);
-  scored = score(effective);
-  renderStatus();
-  renderForms();
+  try {
+    effective = effectiveLog(rawLog);
+    scored = score(effective);
+    renderStatus();
+    renderForms();
+  } catch (e) {
+    toast(`Could not render standings — ${(e && e.message) || e}`, 'error');
+  }
 </script>
 </body>
 </html>
