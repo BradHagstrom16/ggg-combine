@@ -55,7 +55,7 @@ admin.html ──POST /log (PIN, entry+UUID)──▶ Worker ──▶ Durable O
     │  └── offline outbox (queue+flush)      │           drop dup UUIDs
     ▼                                        │
 index.html / ?tv=1 ◀──GET /log (≤10s poll,───┘  + serves /public (same origin)
-     │                 visible tabs, 5s edge cache)
+     │                 visible tabs, ETag/304)
      ▼
 localStorage cache ─▶ effectiveLog (corrections + latest-wins) ─▶ scoring.js ─▶ render.js
 ```

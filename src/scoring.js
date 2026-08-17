@@ -1050,8 +1050,11 @@ function resolveChampionship(players, latest, addIssue) {
   let contenders = leaders;
   const comparable = leaders.every((l) => l.individualPlacements === INDIVIDUAL_EVENTS.length);
   if (comparable) {
-    const best = Math.min(...leaders.map((l) => l.avgIndividualPlacement));
-    const stillTied = leaders.filter((l) => l.avgIndividualPlacement === best);
+    // Compared at 1 decimal, matching the §7 total tie detection and round1's contract — float
+    // dust must never silently break a placement tie. (Placements are exact 0.5-grid today, so
+    // this is a no-op now; it stays correct if that ever changes.)
+    const best = Math.min(...leaders.map((l) => round1(l.avgIndividualPlacement)));
+    const stillTied = leaders.filter((l) => round1(l.avgIndividualPlacement) === best);
     if (stillTied.length === 1) {
       return {
         player: stillTied[0].player, resolvedBy: 'avgIndividualPlacement',

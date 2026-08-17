@@ -3,8 +3,9 @@
  *
  * The board must stay honest in both directions: keep the last-good standings on screen through a
  * wifi blip (rendered from localStorage with an amber "updated Xs ago" stamp), and never hammer
- * the Worker while the tab is hidden. The Worker serves GET /log with a weak ETag and a 5s edge
- * cache, so polls are cheap and conditional (If-None-Match → 304).
+ * the Worker while the tab is hidden. The Worker serves GET /log with a weak ETag, so polls are
+ * cheap and conditional (If-None-Match → 304, no body re-billed). The poller fetches with
+ * `cache: 'no-store'`, so it is that ETag — not the Worker's max-age hint — that does the work.
  *
  * Design: the state transitions are PURE (state in → state out), so every branch — a 200 that
  * refreshes data, a 304 that only confirms freshness, an error that must go stale WITHOUT
