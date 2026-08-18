@@ -47,11 +47,10 @@ storage = "sqlite"
 # Which Durable Object instance holds the log. Changing this and redeploying gives a
 # GUARANTEED-EMPTY log, leaving the old one intact and inspectable.
 #
-# There is exactly one planned use: the dress rehearsal enters a full fake weekend against
-# production, and those entries must not still be in the log on Aug 28. Switch this to
-# "live-2026" after the rehearsal passes, redeploy, and confirm GET /log answers
-# {"count":0, "instance":"live-2026"} before the first real result goes in.
+# Now LIVE for the real event: flipped from "rehearsal" to "live-2026" on 2026-08-17, after the
+# dress rehearsal's full fake weekend, to hand the combine a clean, guaranteed-empty log. The
+# rehearsal instance and all its data remain intact and inspectable under the name "rehearsal".
 #
 # Do NOT change it during the event. GET /log echoes the value back so a mistake is visible
 # instead of silently serving an empty board.
-LOG_INSTANCE = "rehearsal"
+LOG_INSTANCE = "live-2026"
