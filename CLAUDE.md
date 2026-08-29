@@ -1,7 +1,7 @@
 # GGG Combine 2026
 
 Live standings + scoring for the 2nd annual GGG fantasy football combine — 11 players,
-6 scored events, Aug 28–29 2026. Brad (commissioner) is the only writer; everyone else views
+7 scored events (6 planned + Super Volley Beer, added mid-combine 2026-08-28), Aug 28–29 2026. Brad (commissioner) is the only writer; everyone else views
 on a phone, and the standings are projected on a TV.
 
 ## Two standing rules
@@ -122,7 +122,7 @@ visible, audited fixes. Nothing is ever mutated or deleted.
 |---|---|---|
 | `draft_assignment` | event, teams/pairs with captains | (event) |
 | `time` | event, player, value — seconds (Swim/Gauntlet, lower better) or bag score (Bags, higher better) | (event, player) |
-| `wiffle_result` | winning team | (event) |
+| `wiffle_result` | event, winning team — the winner-take-all entry for Wiffle **and** Super Volley Beer (`event: 'supervolley'`); the type name is historical | (event) |
 | `beerball_game` | gameSlot 1–10, pairs, winner, beers per side (0.5 steps; winner 2, loser ≤1.5 — entry rule only, differential scoring unchanged) | (event, gameSlot) |
 | `volleyball_set` | matchSlot 1–3, setNo 1–3, scores | (event, matchSlot, setNo) |
 | `tyler_pick` | stage, target | (stage) — correctable until that stage's `event_final` |
@@ -144,10 +144,15 @@ visible, audited fixes. Nothing is ever mutated or deleted.
   is non-transitive: a 3-way circular knot must be *detected* and flagged
   `manual-resolution-required` (Brad enters an `override`), never silently ordered.
 - **A pick only pays if it burned somebody** (Brad, 2026-08-13). In spec §6 the points and the
-  burn are the same act, so a `tyler_pick` that burned nobody — never made, naming a target that
-  does not resolve, or duplicating a burn already spent (§6.1) — earns nothing and renders
-  pending, never a 0 that reads like a result. The burn ledger decides; `applyTylerBacking`
-  never re-derives it.
+  burn are the same act, so a `tyler_pick` that burned nobody — never made, or naming a target
+  that does not resolve — earns nothing and renders pending, never a 0 that reads like a result.
+  The burn ledger decides; `applyTylerBacking` never re-derives it. **Burns need not be unique**
+  (Brad, 2026-08-28, spec §6.1): a repeat burn is recorded and pays like any other; there is no
+  `duplicate-burn` issue any more.
+- **Team scorers dispatch on `EVENTS[id].result`** (`winner` / `beerball` / `volleyball`), never
+  on the event id. An unknown kind stays pending. The old id-keyed chain fell through to the
+  volleyball scorer, which reads every `volleyball_set` with no event filter — a new team event
+  would have been silently scored off Volleyball's sets.
 - **Pending ≠ zero.** A missing result *before* that event's `event_final` renders as pending
   (hatched, no points). *After* `event_final` it is 0 points — a warning chip, **not an error**
   (spec §3.2 / §10.6).

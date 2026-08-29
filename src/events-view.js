@@ -153,9 +153,9 @@ export function volleyballBoard(result) {
   return { matches, standings };
 }
 
-/** Wiffle: the two teams with the winner flagged (winner-take-all, no game list). */
-export function wiffleBoard(result) {
-  const ev = (result.events || {}).wiffle || {};
+/** A winner-take-all event (Wiffle, Super Volley Beer): the two teams with the winner flagged. */
+export function wiffleBoard(result, eventId = 'wiffle') {
+  const ev = (result.events || {})[eventId] || {};
   const pts = ev.teamPoints || {};
   const teams = (ev.teams || []).map((t) => ({
     id: t.id, captain: t.captain, members: t.members || [],

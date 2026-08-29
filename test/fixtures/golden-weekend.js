@@ -26,6 +26,11 @@
  *   burns 1 and 2). Full round robin, 10 games. P1 wins 4, P2 3, P3 2, P4 1, P5 0
  *   → 100 / 75 / 50 / 25 / 0. Tyler earns P5's 0.
  *
+ * SUPER VOLLEY BEER (added mid-combine, Brad 2026-08-28) — the 7th event, scored exactly like
+ *   Wiffle: 2 teams, winner-take-all, Tyler PLAYS on the 6-side. Team Murph (Murph, Lucas,
+ *   Wyatt, Stu, Yuyi + Tyler) beats Team Mitch (Mitch, Josh, ATM, Helwig, Brad). Winners 100,
+ *   losers 0. (Winners chosen so the hand-computed finishing order below is unchanged.)
+ *
  * SWIM — Lucas, Wyatt, Murph, Stu, Mitch, Yuyi, ATM, Josh, Brad, Helwig (1st→10th).
  *   Tyler picks Lucas (burn 3) → 110, and Lucas's 1st place is Tyler's §7 placement.
  *
@@ -43,9 +48,9 @@
  * Burns, all unique per spec §6.1: Brad, Wyatt, Lucas, Mitch, Stu.
  *
  * Cross-check — total points awarded across the weekend:
- *   Wiffle 600 · Beer Ball 500 · Swim 550 + Tyler 110 · Bags 605 · Volleyball 500 + Tyler 50
- *   · Gauntlet 550 + Tyler 880/9  =  3562.7778, which is exactly the sum of the 11 totals
- *   below. The fixture closes.
+ *   Wiffle 600 · Beer Ball 500 · Super Volley Beer 600 · Swim 550 + Tyler 110 · Bags 605
+ *   · Volleyball 500 + Tyler 50 · Gauntlet 550 + Tyler 880/9  =  4162.7778, which is exactly
+ *   the sum of the 11 totals below. The fixture closes.
  */
 
 import { buildLog } from '../helpers.js';
@@ -54,6 +59,12 @@ const WIFFLE_TEAMS = [
   // Spec §4.1/§10.3: Tyler is always on the 6-player side.
   { id: 'A', label: 'Team Murph', captain: 'Murph', members: ['Murph', 'Lucas', 'Yuyi', 'Helwig', 'Wyatt', 'Tyler'] },
   { id: 'B', label: 'Team Stu', captain: 'Stu', members: ['Stu', 'Josh', 'Mitch', 'ATM', 'Brad'] },
+];
+
+const SUPERVOLLEY_TEAMS = [
+  // Same shape as Wiffle: Tyler plays, on the 6-side (spec §4.7, Brad 2026-08-28).
+  { id: 'SA', label: 'Team Murph', captain: 'Murph', members: ['Murph', 'Lucas', 'Wyatt', 'Stu', 'Yuyi', 'Tyler'] },
+  { id: 'SB', label: 'Team Mitch', captain: 'Mitch', members: ['Mitch', 'Josh', 'ATM', 'Helwig', 'Brad'] },
 ];
 
 const BEERBALL_PAIRS = [
@@ -130,6 +141,11 @@ export const GOLDEN_LOG = buildLog([
   ...BEERBALL_GAMES.map((g) => ({ type: 'beerball_game', event: 'beerball', ...g })),
   { type: 'event_final', event: 'beerball' },
 
+  // Friday — Super Volley Beer (the 7th event; reuses the wiffle_result entry, event-scoped)
+  { type: 'draft_assignment', event: 'supervolley', teams: SUPERVOLLEY_TEAMS },
+  { type: 'wiffle_result', event: 'supervolley', winner: 'SA' },
+  { type: 'event_final', event: 'supervolley' },
+
   // Saturday — Swim (pick locks first, spec §6.1)
   { type: 'tyler_pick', stage: 'swim', target: 'Lucas' },
   ...SWIM_TIMES.map(([player, value]) => ({ type: 'time', event: 'swim', player, value })),
@@ -158,22 +174,28 @@ export const EXPECTED = {
   burns: ['Brad', 'Wyatt', 'Lucas', 'Mitch', 'Stu'],
   order: ['Murph', 'Lucas', 'Wyatt', 'Tyler', 'Stu', 'Yuyi', 'Mitch', 'Josh', 'ATM', 'Helwig', 'Brad'],
   totals: {
-    Murph: 523.1,   // 100 + 75 + 770/9 + 77 + 100 + 770/9
-    Lucas: 513.3,   // 100 + 75 + 110   + 55 + 100 + 660/9
-    Wyatt: 495.8,   // 100 +  0 + 880/9 + 88 + 100 + 110
-    Tyler: 467.8,   // 100 +  0 + 110   + 110 + 50 + 880/9   (Wiffle + Bags his own, the rest backed)
-    Stu: 420.1,     //   0 + 100 + 660/9 + 99 +  50 + 880/9
-    Yuyi: 295.3,    // 100 + 100 + 440/9 + 22 +   0 + 220/9
-    Mitch: 254.0,   //   0 +  50 + 550/9 + 44 +  50 + 440/9
-    Josh: 251.6,    //   0 +  50 + 220/9 + 66 +  50 + 550/9
-    ATM: 131.3,     //   0 +  25 + 330/9 + 33 +   0 + 330/9
-    Helwig: 125.0,  // 100 +  25 +     0 +  0 +   0 + 0
-    Brad: 85.4,     //   0 +   0 + 110/9 + 11 +  50 + 110/9
+    // Wiffle + Beer Ball + SVB + Swim + Bags + Volleyball + Gauntlet
+    Murph: 623.1,   // 100 + 75 + 100 + 770/9 + 77 + 100 + 770/9
+    Lucas: 613.3,   // 100 + 75 + 100 + 110   + 55 + 100 + 660/9
+    Wyatt: 595.8,   // 100 +  0 + 100 + 880/9 + 88 + 100 + 110
+    Tyler: 567.8,   // 100 +  0 + 100 + 110   + 110 + 50 + 880/9   (Wiffle, SVB, Bags his own, the rest backed)
+    Stu: 520.1,     //   0 + 100 + 100 + 660/9 + 99 +  50 + 880/9
+    Yuyi: 395.3,    // 100 + 100 + 100 + 440/9 + 22 +   0 + 220/9
+    Mitch: 254.0,   //   0 +  50 +   0 + 550/9 + 44 +  50 + 440/9
+    Josh: 251.6,    //   0 +  50 +   0 + 220/9 + 66 +  50 + 550/9
+    ATM: 131.3,     //   0 +  25 +   0 + 330/9 + 33 +   0 + 330/9
+    Helwig: 125.0,  // 100 +  25 +   0 +     0 +  0 +   0 + 0
+    Brad: 85.4,     //   0 +   0 +   0 + 110/9 + 11 +  50 + 110/9
   },
   /** Wiffle points prove the winner-take-all split including Tyler, who plays. */
   wiffle: {
     Murph: 100, Lucas: 100, Yuyi: 100, Helwig: 100, Wyatt: 100, Tyler: 100,
     Stu: 0, Josh: 0, Mitch: 0, ATM: 0, Brad: 0,
+  },
+  /** Super Volley Beer: winner-take-all again, Tyler playing — no backing, no burn. */
+  supervolley: {
+    Murph: 100, Lucas: 100, Wyatt: 100, Stu: 100, Yuyi: 100, Tyler: 100,
+    Mitch: 0, Josh: 0, ATM: 0, Helwig: 0, Brad: 0,
   },
   /** Beer Ball placement order and Tyler's pass-through of his pair's exact points. */
   beerballPlacements: ['P1', 'P2', 'P3', 'P4', 'P5'],
@@ -183,4 +205,4 @@ export const EXPECTED = {
   tylerPlacements: { swim: 1, bags: 1, gauntlet: 2 },
 };
 
-export { WIFFLE_TEAMS, BEERBALL_PAIRS, VOLLEYBALL_TEAMS, BEERBALL_GAMES, VOLLEYBALL_SETS, SWIM_TIMES, BAGS_SCORES, GAUNTLET_TIMES };
+export { WIFFLE_TEAMS, SUPERVOLLEY_TEAMS, BEERBALL_PAIRS, VOLLEYBALL_TEAMS, BEERBALL_GAMES, VOLLEYBALL_SETS, SWIM_TIMES, BAGS_SCORES, GAUNTLET_TIMES };

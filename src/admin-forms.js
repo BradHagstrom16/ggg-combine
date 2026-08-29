@@ -79,12 +79,11 @@ export function assignFromTeams(teams, teamIdFor) {
 
 /** The pinned "N of 5 burned" tracker: one entry per slot, in schedule order, straight off the ledger. */
 export function burnTracker(result) {
-  const burns = (result && result.burns) || { slots: [], burned: [], duplicates: [], complete: false };
+  const burns = (result && result.burns) || { slots: [], burned: [], complete: false };
   return {
     total: BURN_COUNT,
     burnedCount: (burns.burned || []).length,
     complete: !!burns.complete,
-    hasDuplicates: (burns.duplicates || []).length > 0,
     slots: (burns.slots || []).map((s) => ({
       slot: s.slot,
       stage: s.stage,
@@ -92,8 +91,6 @@ export function burnTracker(result) {
       filled: s.player != null || s.team != null,
       player: s.player ?? null,
       team: s.team ?? null,
-      duplicate: !!s.duplicateOf,
-      duplicateOf: s.duplicateOf ?? null,
       unresolvedTarget: s.unresolvedTarget ?? null,
       eligibleCount: Array.isArray(s.eligible) ? s.eligible.length : null,
     })),
@@ -103,9 +100,9 @@ export function burnTracker(result) {
 /**
  * Options for one Tyler pick stage (swim / volleyball / gauntlet), each marked eligible-or-not with
  * a reason. Eligibility for an OPEN slot is the engine's own `slot.eligible` list; for a slot that
- * already has a pick (re-pick before lock), it falls back to "not burned by any OTHER stage" — both
- * are ledger-derived, neither re-derives the burn rules. The reason text is looked up from the
- * claimed slots so a disabled option can say who was burned and where.
+ * already has a pick (re-pick before lock) every option is offered — burns need not be unique
+ * (Brad, 2026-08-28), so nothing about a previous burn can disqualify a target. Neither path
+ * re-derives the burn rules. `burns` still names who the pick would burn, for the tracker.
  */
 export function burnChooser(result, stage) {
   const burns = (result && result.burns) || { slots: [] };
@@ -114,20 +111,13 @@ export function burnChooser(result, stage) {
 
   const engineEligible = slot && Array.isArray(slot.eligible) ? new Set(slot.eligible) : null;
 
-  // Who was burned by the OTHER stages (so the current stage's own target stays selectable).
-  const burnedByOthers = new Map();
-  for (const s of burns.slots || []) {
-    if (s.stage !== stage && s.player) burnedByOthers.set(s.player, s.label);
-  }
-
   const currentPick = slot ? (slot.team ?? slot.player ?? slot.unresolvedTarget ?? null) : null;
 
   let options;
   if (unit === 'team') {
     const teams = (result.events && result.events.volleyball && result.events.volleyball.teams) || [];
     options = teams.map((t) => {
-      const eligible = engineEligible ? engineEligible.has(t.id) : !burnedByOthers.has(t.captain);
-      const burnedAt = burnedByOthers.get(t.captain);
+      const eligible = engineEligible ? engineEligible.has(t.id) : true;
       return {
         id: t.id,
         label: `Team ${t.captain}`,
@@ -135,20 +125,19 @@ export function burnChooser(result, stage) {
         burns: t.captain,
         eligible,
         selected: t.id === currentPick,
-        reason: eligible ? null : (burnedAt ? `${t.captain} already burned — ${burnedAt}` : 'captain unavailable'),
+        reason: eligible ? null : 'captain unavailable',
       };
     });
   } else {
     options = ABLE.map((p) => {
-      const eligible = engineEligible ? engineEligible.has(p) : !burnedByOthers.has(p);
-      const burnedAt = burnedByOthers.get(p);
+      const eligible = engineEligible ? engineEligible.has(p) : true;
       return {
         id: p,
         label: p,
         burns: p,
         eligible,
         selected: p === currentPick,
-        reason: eligible ? null : (burnedAt ? `already burned — ${burnedAt}` : 'not eligible'),
+        reason: eligible ? null : 'not eligible',
       };
     });
   }
@@ -158,8 +147,6 @@ export function burnChooser(result, stage) {
     label: (slot && slot.label) || stage,
     unit,
     currentPick,
-    duplicate: !!(slot && slot.duplicateOf),
-    duplicateOf: (slot && slot.duplicateOf) ?? null,
     unresolvedTarget: (slot && slot.unresolvedTarget) ?? null,
     options,
     eligibleCount: options.filter((o) => o.eligible).length,

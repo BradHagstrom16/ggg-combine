@@ -425,19 +425,24 @@ function volleyballStats(teams, matches) {
  * there is exactly one source of truth for who is in it. Slots 3–5 come from `tyler_pick`
  * entries. The Volleyball pick burns the captain ONLY (spec §6.1: a roster is diluted
  * exposure, an individual pick is full exposure).
+ *
+ * Burns need NOT be unique (Brad, 2026-08-28 — spec §6.1 ruling made mid-combine, after he had
+ * picked Team Mitch for Volleyball and then drafted Mitch into his Beer Ball pair). The ledger
+ * records every burn for display; it never refuses a repeat, and the eligible pool for an
+ * upcoming pick is every able player (or every drafted team with a real captain). Because
+ * nothing here can disqualify a resolved pick any more, `duplicateOf` is always null.
  */
 export function buildBurns({ drafts, picks, teamsByEvent }) {
   const slots = [];
-  const burned = new Map(); // player -> the stage that burned them
+  const burned = new Map(); // player -> the first stage that burned them (display only)
 
   const claim = (player, stage, slot, label) => {
-    const duplicateOf = burned.get(player) ?? null;
-    if (!duplicateOf) burned.set(player, stage);
-    slots.push({ slot, stage, label, player, duplicateOf });
+    if (!burned.has(player)) burned.set(player, stage);
+    slots.push({ slot, stage, label, player, duplicateOf: null });
   };
 
   for (const stageDef of BURN_STAGES) {
-    const eligible = ABLE.filter((p) => !burned.has(p));
+    const eligible = [...ABLE];
 
     if (stageDef.source === 'draft') {
       const pair = (drafts.beerball ?? []).find((t) => t.captain === GM);
@@ -456,11 +461,11 @@ export function buildBurns({ drafts, picks, teamsByEvent }) {
     const isTeamPick = TYLER_BACKING[stageDef.stage].unit === 'team';
     const teams = teamsByEvent[stageDef.stage] ?? [];
     const pick = picks[stageDef.stage];
-    // Volleyball offers teams whose captain is a real player and still unburned; the others
-    // offer players. A team whose captain field is a typo has nobody to burn, so it is not a
-    // pick Tyler can make (spec §6.1: the Volleyball pick burns the CAPTAIN only).
+    // Volleyball offers teams whose captain is a real player; the others offer players. A team
+    // whose captain field is a typo has nobody to burn, so it is not a pick Tyler can make
+    // (spec §6.1: the Volleyball pick burns the CAPTAIN only).
     const eligibleTargets = isTeamPick
-      ? teams.filter((t) => ABLE.includes(t.captain) && !burned.has(t.captain)).map((t) => t.id)
+      ? teams.filter((t) => ABLE.includes(t.captain)).map((t) => t.id)
       : eligible;
 
     // Which makes both kinds of pick the same question: does this target name somebody who can
@@ -484,12 +489,10 @@ export function buildBurns({ drafts, picks, teamsByEvent }) {
     if (isTeamPick) slots[slots.length - 1].team = pick.target;
   }
 
-  const duplicates = slots.filter((s) => s.duplicateOf);
   return {
     slots,
     burned: [...burned.keys()],
-    duplicates,
-    complete: slots.filter((s) => s.player).length === BURN_COUNT && duplicates.length === 0,
+    complete: slots.filter((s) => s.player).length === BURN_COUNT,
   };
 }
 
@@ -579,12 +582,6 @@ export function score(effective, options = {}) {
         : `${GM}'s ${EVENTS[slot.stage].label} pick names ${slot.unresolvedTarget}, who is not an eligible player — re-enter the pick.`,
       { stage: slot.stage, target: slot.unresolvedTarget });
   }
-  for (const dup of burns.duplicates) {
-    addIssue('error', 'duplicate-burn',
-      `${dup.player} is already burned (${EVENTS[dup.duplicateOf]?.label ?? dup.duplicateOf}) — spec §6.1 requires all 5 burns to be unique.`,
-      { stage: dup.stage, player: dup.player });
-  }
-
   // --- per-event scoring ---------------------------------------------------------------
   const events = {};
   for (const eventId of EVENT_ORDER) {
@@ -793,11 +790,19 @@ function scoreTeamEvent(eventId, { latest, effective, teams, addIssue }) {
     };
   }
 
-  const detail = eventId === 'wiffle'
-    ? wiffleDetail(latest, teams)
-    : eventId === 'beerball'
+  // Dispatch on the CONFIGURED result kind, never on the event id. The old id-keyed chain had
+  // an `else → volleyballDetail`, and volleyballDetail reads every volleyball_set in the log with
+  // no event filter — so any team event it did not name would have been silently scored off
+  // Volleyball's sets (a 2-way "tie" at 50 each once Volleyball was decided). An unknown kind
+  // now stays pending, which is wrong in the safe direction. Surfaced when Super Volley Beer
+  // was added mid-combine (Brad, 2026-08-28).
+  const detail = config.result === 'winner'
+    ? winnerDetail(latest, teams, eventId)
+    : config.result === 'beerball'
       ? beerballDetail(effective, teams)
-      : volleyballDetail(effective, teams);
+      : config.result === 'volleyball'
+        ? volleyballDetail(effective, teams)
+        : { complete: false };
 
   for (const match of detail.matches ?? []) {
     if (!match.extraSets) continue;
@@ -855,13 +860,18 @@ function scoreTeamEvent(eventId, { latest, effective, teams, addIssue }) {
   };
 }
 
-function wiffleDetail(latest, teams) {
-  const result = latest.get('wiffle_result:wiffle');
+/**
+ * Winner-take-all team events (Wiffle §4.1, Super Volley Beer §4.7): one `wiffle_result` entry
+ * names the winning team. The entry type keeps its original name for log compatibility; its
+ * latest-wins key is event-scoped (see entryKey), so each event reads only its own result.
+ */
+function winnerDetail(latest, teams, eventId) {
+  const result = latest.get(`wiffle_result:${eventId}`);
   const winner = result?.winner ?? null;
   return {
     winner,
     complete: Boolean(winner),
-    // Spec §4.1 is winner-take-all, so there is no round robin to resolve: the "stats" are
+    // Winner-take-all, so there is no round robin to resolve: the "stats" are
     // just the result, expressed so the shared placement machinery can consume them.
     ctx: {
       stats: Object.fromEntries(teams.map((t) => [t.id, { wins: t.id === winner ? 1 : 0 }])),
@@ -911,12 +921,13 @@ function volleyballDetail(effective, teams) {
  * Pass-through, never recomputed, so his cell always matches theirs to the decimal.
  *
  * A pick only pays if it BURNED somebody. In spec §6 the points and the burn are the same act,
- * so a pick that burned nobody — never made, naming a target that does not resolve, or spending
- * a burn Tyler already spent (§6.1: all five unique) — earns nothing, and his cell renders
- * pending until it is fixed (Brad, 2026-08-13). Showing points from an illegal pick would put a
- * number on the TV that he is not entitled to, and quietly fold it into the §7 championship.
- * The burn ledger is the single source of truth for that: it has already run every check, and
- * each failure has already named itself in `issues`.
+ * so a pick that burned nobody — never made, or naming a target that does not resolve — earns
+ * nothing, and his cell renders pending until it is fixed (Brad, 2026-08-13). Showing points
+ * from a pick that resolved to nobody would put a number on the TV that he is not entitled to,
+ * and quietly fold it into the §7 championship. The burn ledger is the single source of truth
+ * for that: it has already run every check, and each failure has already named itself in
+ * `issues`. (A REPEAT burn is not a failure any more — Brad dropped §6.1 uniqueness on
+ * 2026-08-28 — so a resolved pick always pays, whoever it names.)
  */
 function applyTylerBacking(events, { picks, teamsByEvent, burns, addIssue }) {
   for (const [eventId, backing] of Object.entries(TYLER_BACKING)) {
@@ -947,8 +958,8 @@ function applyTylerBacking(events, { picks, teamsByEvent, burns, addIssue }) {
     }
 
     const slot = burns.slots.find((s) => s.stage === eventId);
-    if (!slot?.player || slot.duplicateOf) {
-      event.tylerSource = null; // the pick burned nobody: unresolved target, or already spent
+    if (!slot?.player) {
+      event.tylerSource = null; // the pick burned nobody: its target never resolved
       continue;
     }
 
