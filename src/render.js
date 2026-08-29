@@ -55,8 +55,18 @@ function formatKnob(knob) {
   return String(Number(Number(knob).toFixed(2)));
 }
 
-export function knobChipText(knob) {
-  return `INDIVIDUAL ×${formatKnob(knob)}`;
+/**
+ * "INDIVIDUAL ×1.25" — plus " · GAUNTLET ×1.5" for every individual event carrying a FIXED
+ * multiplier that ignores the knob (spec §3.1, Brad 2026-08-28). Derived from the scored events,
+ * never hard-coded, so the chip can't lie about which columns the slider actually moves.
+ */
+export function knobChipText(knob, events) {
+  const fixed = Object.values(events || {})
+    .filter((e) => e && e.type === 'individual' && e.usesKnob === false && Number.isFinite(e.multiplier))
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .map((e) => ` · ${String(e.short || e.id).toUpperCase()} ×${formatKnob(e.multiplier)}`)
+    .join('');
+  return `INDIVIDUAL ×${formatKnob(knob)}${fixed}`;
 }
 
 /** "updated Xs ago" — amber once it crosses ~60s so a frozen board is obvious on the TV. */

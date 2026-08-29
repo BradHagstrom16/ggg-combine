@@ -93,6 +93,17 @@ test('knobChipText', () => {
   assert.equal(knobChipText(1.05), 'INDIVIDUAL ×1.05');
 });
 
+test('knobChipText names every individual event with a FIXED multiplier (Gauntlet ×1.5, Brad 2026-08-28)', () => {
+  const events = {
+    swim: { id: 'swim', type: 'individual', short: 'Swim', order: 3, multiplier: 1.25, usesKnob: true },
+    gauntlet: { id: 'gauntlet', type: 'individual', short: 'Gauntlet', order: 6, multiplier: 1.5, usesKnob: false },
+    wiffle: { id: 'wiffle', type: 'team', short: 'Wiffle', order: 1 },
+  };
+  assert.equal(knobChipText(1.25, events), 'INDIVIDUAL ×1.25 · GAUNTLET ×1.5');
+  assert.equal(knobChipText(1.1, { swim: events.swim }), 'INDIVIDUAL ×1.1', 'knob-following events add nothing');
+  assert.equal(knobChipText(1.1, {}), 'INDIVIDUAL ×1.1');
+});
+
 test('ageLabel: seconds/minutes/hours and amber past ~60s', () => {
   assert.deepEqual(ageLabel(12000), { text: 'updated 12s ago', amber: false });
   assert.equal(ageLabel(59000).amber, false);

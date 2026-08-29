@@ -25,7 +25,7 @@ Stu, Murph, Tyler, Josh, Lucas, Mitch, Yuyi, ATM, Helwig, Brad, Wyatt
 
 ## 3. Events & Scoring Overview
 
-Seven scored events. Three individual, four team. All events nominally worth 100 points; individual events are multiplied by the live **Individual Multiplier** (the "knob"). *(Originally six — Super Volley Beer was added mid-combine; Brad, 2026-08-28. See §4.7.)*
+Eight scored events. Four individual, four team. All events nominally worth 100 points; individual events are multiplied by the live **Individual Multiplier** (the "knob") — except the Gauntlet, which is fixed at ×1.5 (§3.1). *(Originally six — Super Volley Beer and Blackjack were added mid-combine; Brad, 2026-08-28. See §4.7, §4.8.)*
 
 | # | Event | Type | Who plays | Points |
 |---|-------|------|-----------|--------|
@@ -34,29 +34,31 @@ Seven scored events. Three individual, four team. All events nominally worth 100
 | 3 | Swim | Individual, timed | 10 able | rank-based × knob |
 | 4 | Bags | Individual, timed | All 11 | rank-based × knob |
 | 5 | Volleyball | Team (3 teams: 4/3/3) | 10 able | 100 / 50 / 0 × 1 |
-| 6 | Gauntlet | Individual, timed | 10 able | rank-based × knob |
+| 6 | Gauntlet | Individual, timed | 10 able | rank-based × **1.5 (fixed)** |
 | 7 | Super Volley Beer | Team (2 teams, 6v5) | All 11 (Tyler plays) | 100 / 0 × 1 |
+| 8 | Blackjack | Individual, highest score | All 11 (Tyler plays) | rank-based × knob |
 
 Golf is played Friday morning as an **exhibition — zero combine points**. It may appear on the agenda page but must never touch standings.
 
 ### 3.1 The Knob (Individual Multiplier)
 
-- A single adjustable value applied to all three individual events' points.
+- A single adjustable value applied to the knob-following individual events' points (Swim, Bags, Blackjack).
 - **Default: 1.1.** Adjustable range: **1.0 – 2.0**, in steps of at least 0.05.
+- **(Brad, 2026-08-28) The Gauntlet is fixed at ×1.5 and does not follow the knob.** Every other individual event follows the knob, which Brad set to **1.25** for the event. The knob stays live so those three can still be rebalanced.
 - Must be changeable live at any time; standings recompute immediately.
 - Rationale (do not re-derive, just preserve): a 200,000-run Monte Carlo audit of this exact 6-event structure found the individual-vs-team "who wins" influence crosses 50/50 at ≈1.10 under moderate skill-carryover assumptions (≈1.25 low-carryover, ≈1.00 high-carryover). 1.1 is the calibrated default; the knob exists so Brad can rebalance live.
 
 ### 3.2 Individual event points formula
 
-Rank players by time, **lower time = better**. With `n` participants, the player ranked `r` (1 = best) earns:
+Rank players by time, **lower time = better** (Bags and Blackjack are scores: **higher = better**). With `n` participants, the player ranked `r` (1 = best) earns:
 
 ```
 raw_points = 100 × (n − r) / (n − 1)
-final_points = raw_points × knob
+final_points = raw_points × multiplier      (the knob — or the event's fixed value, §3.1)
 ```
 
 - Swim, Gauntlet: `n = 10` (spacing ≈ 11.11).
-- Bags: `n = 11` (spacing = 10).
+- Bags, Blackjack: `n = 11` (spacing = 10).
 - **Ties (identical times):** tied players share the average of the points for the positions they occupy. E.g., tie for 2nd/3rd → both get the mean of the 2nd- and 3rd-place points.
 - **Blank time for a player who should have competed = 0 points** (treated as last; if multiple blanks, they all get 0).
 
@@ -102,6 +104,12 @@ final_points = raw_points × knob
 - Result as played: **Brad, Mitch, Yuyi, Josh, ATM, Tyler** won (100 each); Stu, Murph, Lucas, Helwig, Wyatt 0.
 - Captains (labels only): Brad, Stu.
 
+### 4.8 Blackjack — added mid-combine (Brad, 2026-08-28)
+- An individual event added on the day and ruled a full scored event. Played **Saturday, before the Gauntlet**.
+- **All 11 play**, including Tyler — his own result, no backing, no burn (like Bags).
+- **Highest score wins.** Each player's final score is entered as a whole number; ranked per §3.2 with `n = 11`, × the live knob.
+- Counts in the §7 average-placement tiebreak like every individual event.
+
 ## 5. Captainships & Drafts
 
 - 10 captain slots = 10 non-Brad players: Wiffle 2 (Murph, Stu) + Volleyball 3 (Mitch, Helwig, Wyatt) + Beer Ball 5 (Yuyi, Lucas, Josh, ATM, Tyler).
@@ -134,8 +142,8 @@ Tyler **plays** two events (Bags, Wiffle) and **owns/backs** four:
 
 ## 7. Championship & Tiebreakers
 
-- Champion = highest total points across all seven events (six originally; §4.7 added 2026-08-28).
-- **Tie on total:** lowest **average placement across the three individual events** wins. For Swim and Gauntlet, Tyler's placement = his picked player's placement; for Bags, his own.
+- Champion = highest total points across all eight events (six originally; §4.7 and §4.8 added 2026-08-28).
+- **Tie on total:** lowest **average placement across the individual events** (four as of 2026-08-28: Swim, Bags, Blackjack, Gauntlet) wins. For Swim and Gauntlet, Tyler's placement = his picked player's placement; for Bags and Blackjack, his own. Every tied leader must hold all four placements or the step is skipped (Brad, 2026-08-13).
 - **Still tied:** beer pong, head-to-head.
 
 ## 8. Data Model & Entry Workflows (guidance, not prescription)
@@ -173,9 +181,10 @@ Only Brad enters data. Everyone else views. Standings page is the centerpiece �
 1. Tyler's Swim pick locks (burn 3) → **SWIM** (locked opener)
 2. **BAGS** (all 11)
 3. Volleyball draft → Tyler's team pick locks (burn 4) → **VOLLEYBALL**
-4. Tyler's Gauntlet pick locks (burn 5) → **GAUNTLET** (locked finale)
-5. Champion crowned (tiebreaks per §7)
-6. Evening: **Fantasy Draft**
+4. **BLACKJACK** (all 11 — added 2026-08-28)
+5. Tyler's Gauntlet pick locks (burn 5) → **GAUNTLET** (locked finale, ×1.5)
+6. Champion crowned (tiebreaks per §7)
+7. Evening: **Fantasy Draft**
 
 No clock times anywhere — order only.
 

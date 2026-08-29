@@ -16,14 +16,17 @@ import { clampKnob, round1, rawPointsForRank, KNOB, ABLE, ROSTER } from '../src/
 import { buildLog, append, row, totals, codes } from './helpers.js';
 import {
   GOLDEN_LOG, EXPECTED, WIFFLE_TEAMS, SUPERVOLLEY_TEAMS, BEERBALL_PAIRS, VOLLEYBALL_TEAMS,
+  BLACKJACK_SCORES,
 } from './fixtures/golden-weekend.js';
 
 const run = (log) => score(effectiveLog(log));
 
-/** Swim/Gauntlet ladder at the default knob, as exact ninths (n=10). */
+/** Swim ladder at the default knob, as exact ninths (n=10). */
 const S = (rank) => (rawPointsForRank(rank, 10) * 1.1);
-/** Bags ladder at the default knob (n=11). */
+/** Bags / Blackjack ladder at the default knob (n=11). */
 const B = (rank) => (rawPointsForRank(rank, 11) * 1.1);
+/** Gauntlet ladder — FIXED ×1.5, never the knob (Brad, 2026-08-28; spec §3.1). */
+const G = (rank) => (rawPointsForRank(rank, 10) * 1.5);
 
 // =======================================================================================
 // The golden weekend — the primary gate
@@ -45,9 +48,22 @@ describe('golden weekend (hand-computed, spec-derived)', () => {
     assert.equal(result.championship.resolvedBy, EXPECTED.championResolvedBy);
   });
 
-  test('the weekend closes: awarded points sum to 4162.7778', () => {
+  test('the weekend closes: awarded points sum to 5003.3333', () => {
     const sum = result.players.reduce((acc, p) => acc + p.total, 0);
-    assert.equal(round1(sum), 4162.8);
+    assert.equal(round1(sum), 5003.3);
+  });
+
+  test('Blackjack is highest-wins for all 11 at the knob, and Gauntlet is fixed at ×1.5', () => {
+    assert.equal(result.events.blackjack.points.Murph, B(1));
+    assert.equal(result.events.blackjack.points.Tyler, B(4), 'Tyler plays his own Blackjack');
+    assert.equal(result.events.blackjack.points.Brad, 0);
+    assert.equal(result.events.blackjack.placement.Tyler, EXPECTED.tylerPlacements.blackjack);
+    assert.equal(result.events.gauntlet.points.Wyatt, G(1));
+    assert.equal(result.events.gauntlet.points.Tyler, G(2), 'pass-through of Stu, at Gauntlet\'s own ×1.5');
+    assert.equal(result.events.gauntlet.multiplier, 1.5);
+    assert.equal(result.events.gauntlet.usesKnob, false);
+    assert.equal(result.events.blackjack.multiplier, 1.1);
+    assert.equal(result.events.blackjack.usesKnob, true);
   });
 
   test('Super Volley Beer is winner-take-all like Wiffle and Tyler earns his own 100', () => {
@@ -875,7 +891,7 @@ describe('Super Volley Beer (spec §4.7)', () => {
     const result = run(sixEvent);
     assert.equal(result.events.supervolley.status, 'pending');
     assert.equal(row(result, 'Murph').byEvent.supervolley.pending, true);
-    assert.equal(round1(row(result, 'Murph').total), 523.1);
+    assert.equal(round1(row(result, 'Murph').total), round1(EXPECTED.totals.Murph - 100));
     assert.deepEqual(result.issues.filter((i) => i.level === 'error'), []);
   });
 
@@ -1221,16 +1237,27 @@ describe('championship tiebreak chain (spec §7)', () => {
    * points, placement 6). Every able player therefore totals exactly 165 in real arithmetic —
    * and exactly 17/3 average placement, over all three individual events — so the §7 chain has
    * to run the whole way to beer pong.
+   *
+   * Since 2026-08-28 there are FOUR individual events and the Gauntlet is fixed at ×1.5, so the
+   * mirror is built from the two n=11, knob-following events instead: Bags ranks everyone
+   * 1st→11th, Blackjack ranks them 11th→1st (110(11−r)/10 + 110(r−1)/10 = 110 for all), while
+   * Swim and Gauntlet are dead heats (every able player shares the ladder: 50 × knob and 75,
+   * placement 5.5). At knob 1.15 every able player totals exactly 247.5 in real arithmetic
+   * (57.5 + 115 + 75) — but not in floating point, which is the point — and averages exactly
+   * 23/4 placement.
    */
   const reversal = (() => {
-    const swim = ABLE.map((player, i) => ({ type: 'time', event: 'swim', player, value: 50 + i }));
-    const bags = ROSTER.map((player) => ({ type: 'time', event: 'bags', player, value: 12 }));
-    const gauntlet = [...ABLE].reverse().map((player, i) => (
-      { type: 'time', event: 'gauntlet', player, value: 50 + i }
+    const swim = ABLE.map((player) => ({ type: 'time', event: 'swim', player, value: 60 }));
+    const bags = ROSTER.map((player, i) => ({ type: 'time', event: 'bags', player, value: 30 - i }));
+    const blackjack = [...ROSTER].reverse().map((player, i) => (
+      { type: 'time', event: 'blackjack', player, value: 30 - i }
     ));
+    const gauntlet = ABLE.map((player) => ({ type: 'time', event: 'gauntlet', player, value: 50 }));
     return buildLog([
+      { type: 'knob', value: 1.15 }, // the one knob value in the grid whose ladders leave float dust
       ...swim, { type: 'event_final', event: 'swim' },
       ...bags, { type: 'event_final', event: 'bags' },
+      ...blackjack, { type: 'event_final', event: 'blackjack' },
       ...gauntlet, { type: 'event_final', event: 'gauntlet' },
     ]);
   })();
@@ -1243,7 +1270,7 @@ describe('championship tiebreak chain (spec §7)', () => {
     assert.ok(raw.size > 1, 'precondition: the raw float totals are NOT all identical');
 
     const rounded = new Set(able.map((p) => p.totalRounded));
-    assert.deepEqual([...rounded], [165], 'but at 1 decimal every one of them is 165.0');
+    assert.deepEqual([...rounded], [247.5], 'but at 1 decimal every one of them is 247.5');
 
     for (const player of able) assert.equal(player.rankLabel, 'T1');
   });
@@ -1251,10 +1278,10 @@ describe('championship tiebreak chain (spec §7)', () => {
   test('with totals AND average placement tied, §7 calls for beer pong', () => {
     const result = run(reversal);
     const able = result.players.filter((p) => p.player !== 'Tyler');
-    // (swim r + bags 6 + gauntlet 11−r) / 3 = 17/3, for every one of them.
+    // (swim 5.5 + bags r + blackjack 12−r + gauntlet 5.5) / 4 = 23/4, for every one of them.
     for (const player of able) {
-      assert.equal(player.avgIndividualPlacement, 17 / 3);
-      assert.equal(player.individualPlacements, 3, 'all three placements are in hand');
+      assert.equal(player.avgIndividualPlacement, 23 / 4);
+      assert.equal(player.individualPlacements, 4, 'all four placements are in hand');
     }
 
     assert.equal(result.championship.player, null, 'no champion may be invented');
@@ -1276,51 +1303,74 @@ describe('championship tiebreak chain (spec §7)', () => {
   });
 
   /**
-   * Middle link: two players tie at exactly 213.9 but on different routes.
-   *   X — Swim 1st (110) + Bags 11th (0)  + Gauntlet T1st (103.89) → placements (1 + 11 + 1.5)/3 = 4.5
-   *   Y — Swim 10th (0)  + Bags 1st (110) + Gauntlet T1st (103.89) → placements (10 + 1 + 1.5)/3 ≈ 4.17  ← lower wins
+   * Middle link: two players tie at exactly 356.2 but on different routes.
+   *   X — Swim 1st (110) + Bags 11th (0)  + Blackjack T1st (104.5) + Gauntlet T1st (141.67, ×1.5)
+   *       → placements (1 + 11 + 1.5 + 1.5)/4 = 3.75
+   *   Y — Swim 10th (0)  + Bags 1st (110) + Blackjack T1st (104.5) + Gauntlet T1st (141.67)
+   *       → placements (10 + 1 + 1.5 + 1.5)/4 = 3.5  ← lower wins
    *
-   * The Gauntlet dead heat is what keeps them level while handing both of them a complete set
-   * of three individual placements, which §7's average-placement step requires. Everyone else
-   * is paired to land far below: the best of them is Murph, at Swim 2nd (97.78) + Bags 10th (11)
-   * + Gauntlet 3rd (85.56) = 194.3.
+   * The Blackjack and Gauntlet dead heats keep them level while handing both a complete set of
+   * FOUR individual placements, which §7's average-placement step requires. Everyone else is
+   * paired to land far below: the best of them is Murph, at Swim 2nd (97.78) + Bags 10th (11)
+   * + Blackjack 3rd (88) + Gauntlet 3rd (116.67) = 313.4.
    */
-  test('a tie on total is broken by the lowest average individual placement', () => {
+  const tiedLeadersLog = (withBlackjack) => {
     const swimOrder = ['Stu', 'Murph', 'Josh', 'Lucas', 'Mitch', 'Yuyi', 'ATM', 'Helwig', 'Brad', 'Wyatt'];
     //  X = Stu (swim 1st, bags 11th) · Y = Wyatt (swim 10th, bags 1st)
     const bagsOrder = ['Wyatt', 'Tyler', 'Brad', 'Helwig', 'ATM', 'Yuyi', 'Mitch', 'Lucas', 'Josh', 'Murph', 'Stu'];
+    const blackjackOrder = ['Murph', 'Tyler', 'Josh', 'Lucas', 'Mitch', 'Yuyi', 'ATM', 'Helwig', 'Brad'];
     const gauntletOrder = ['Murph', 'Josh', 'Lucas', 'Mitch', 'Yuyi', 'ATM', 'Helwig', 'Brad'];
-
-    const log = buildLog([
+    return buildLog([
       ...swimOrder.map((player, i) => ({ type: 'time', event: 'swim', player, value: 50 + i })),
       { type: 'tyler_pick', stage: 'swim', target: 'Wyatt' }, // Tyler rides the slowest swimmer: 0
       { type: 'event_final', event: 'swim' },
       ...bagsOrder.map((player, i) => ({ type: 'time', event: 'bags', player, value: 100 - i })),
       { type: 'event_final', event: 'bags' },
+      ...(withBlackjack ? [
+        // Stu and Wyatt dead-heat Blackjack and split 1st/2nd; the other nine finish behind.
+        { type: 'time', event: 'blackjack', player: 'Stu', value: 30 },
+        { type: 'time', event: 'blackjack', player: 'Wyatt', value: 30 },
+        ...blackjackOrder.map((player, i) => ({ type: 'time', event: 'blackjack', player, value: 25 - i })),
+        { type: 'event_final', event: 'blackjack' },
+      ] : []),
       // Stu and Wyatt dead-heat the Gauntlet and split 1st/2nd; the other eight finish behind.
       { type: 'time', event: 'gauntlet', player: 'Stu', value: 40 },
       { type: 'time', event: 'gauntlet', player: 'Wyatt', value: 40 },
       ...gauntletOrder.map((player, i) => ({ type: 'time', event: 'gauntlet', player, value: 50 + i })),
       { type: 'event_final', event: 'gauntlet' },
     ]);
-    const result = run(log);
+  };
 
-    assert.equal(row(result, 'Stu').totalRounded, 213.9);
-    assert.equal(row(result, 'Wyatt').totalRounded, 213.9);
-    assert.equal(row(result, 'Stu').avgIndividualPlacement, 13.5 / 3);
-    assert.equal(row(result, 'Wyatt').avgIndividualPlacement, 12.5 / 3);
+  test('a tie on total is broken by the lowest average individual placement', () => {
+    const result = run(tiedLeadersLog(true));
+
+    assert.equal(row(result, 'Stu').totalRounded, 356.2);
+    assert.equal(row(result, 'Wyatt').totalRounded, 356.2);
+    assert.equal(row(result, 'Stu').avgIndividualPlacement, 15 / 4);
+    assert.equal(row(result, 'Wyatt').avgIndividualPlacement, 14 / 4);
     // Nobody else comes close.
     const others = result.players.filter((p) => !['Stu', 'Wyatt'].includes(p.player));
-    for (const player of others) assert.ok(player.totalRounded < 213.9, `${player.player} < 213.9`);
+    for (const player of others) assert.ok(player.totalRounded < 356.2, `${player.player} < 356.2`);
 
     assert.equal(result.championship.player, 'Wyatt');
     assert.equal(result.championship.resolvedBy, 'avgIndividualPlacement');
   });
 
+  test('while Blackjack is still pending, a tie is not comparable and goes to beer pong', () => {
+    // Same two leaders, but Blackjack has not been played: three placements each is not the
+    // four §7 now needs (Brad, 2026-08-13 ruling applied to the 2026-08-28 four-event list).
+    const result = run(tiedLeadersLog(false));
+    assert.equal(row(result, 'Stu').totalRounded, row(result, 'Wyatt').totalRounded);
+    assert.equal(row(result, 'Stu').individualPlacements, 3);
+    assert.notEqual(result.championship.resolvedBy, 'avgIndividualPlacement');
+    assert.equal(result.championship.player, null);
+    assert.deepEqual([...result.championship.contenders].sort(), ['Stu', 'Wyatt']);
+  });
+
   test('an incomplete placement set never decides the title — §7 goes to beer pong instead', () => {
-    // Same tie, but Tyler is in it with only two of the three placements: he plays Bags, backs
-    // Wyatt in the Swim, and never picked for the Gauntlet. A 2-event average is not the same
-    // quantity as a 3-event one, so it cannot be what crowns or dethrones anybody.
+    // Same tie, but Tyler is in it with only three of the four placements: he plays Bags and
+    // Blackjack, backs Stu in the Swim, and never picked for the Gauntlet. A 3-event average is
+    // not the same quantity as a 4-event one, so it cannot be what crowns or dethrones anybody.
     const swimOrder = ['Stu', 'Murph', 'Josh', 'Lucas', 'Mitch', 'Yuyi', 'ATM', 'Helwig', 'Brad', 'Wyatt'];
     const log = buildLog([
       ...swimOrder.map((player, i) => ({ type: 'time', event: 'swim', player, value: 50 + i })),
@@ -1328,15 +1378,17 @@ describe('championship tiebreak chain (spec §7)', () => {
       { type: 'event_final', event: 'swim' },
       ...ROSTER.map((player) => ({ type: 'time', event: 'bags', player, value: 12 })), // dead heat: 55 each
       { type: 'event_final', event: 'bags' },
+      ...ROSTER.map((player) => ({ type: 'time', event: 'blackjack', player, value: 20 })), // dead heat: 55 each
+      { type: 'event_final', event: 'blackjack' },
       { type: 'event_final', event: 'gauntlet' }, // finalized with no times at all: 0 for everyone
     ]);
     const result = run(log);
 
-    // Stu and Tyler both hold 110 + 55; Tyler has 2 placements to Stu's 3.
-    assert.equal(row(result, 'Stu').totalRounded, 165);
-    assert.equal(row(result, 'Tyler').totalRounded, 165);
-    assert.equal(row(result, 'Stu').individualPlacements, 3);
-    assert.equal(row(result, 'Tyler').individualPlacements, 2);
+    // Stu and Tyler both hold 110 + 55 + 55; Tyler has 3 placements to Stu's 4.
+    assert.equal(row(result, 'Stu').totalRounded, 220);
+    assert.equal(row(result, 'Tyler').totalRounded, 220);
+    assert.equal(row(result, 'Stu').individualPlacements, 4);
+    assert.equal(row(result, 'Tyler').individualPlacements, 3);
 
     assert.notEqual(result.championship.resolvedBy, 'avgIndividualPlacement');
     assert.equal(result.championship.player, null, 'no champion may be invented');
@@ -1368,25 +1420,96 @@ describe('championship tiebreak chain (spec §7)', () => {
 });
 
 // =======================================================================================
+// Blackjack — the 8th event, added mid-combine (Brad, 2026-08-28; spec §4.8)
+// =======================================================================================
+
+describe('Blackjack (spec §4.8)', () => {
+  test('all 11 play, highest score wins, × knob, Tyler on his own result', () => {
+    const log = buildLog([
+      ...BLACKJACK_SCORES.map(([player, value]) => ({ type: 'time', event: 'blackjack', player, value })),
+    ]);
+    const result = run(log);
+    const ev = result.events.blackjack;
+    assert.equal(ev.status, 'unfinalized');
+    assert.equal(ev.points.Murph, B(1));
+    assert.equal(ev.points.Tyler, B(4));
+    assert.equal(ev.placement.Tyler, 4);
+    assert.equal(ev.points.Brad, 0);
+    assert.equal(ev.tylerSource, undefined, 'no backing, no burn — he plays');
+    assert.equal(result.burns.slots.length, 5, 'Blackjack adds no burn slot');
+    assert.equal(row(result, 'Tyler').byEvent.blackjack.pending, false);
+    // A Blackjack score never bleeds into Bags (same unit, same n, different event key).
+    assert.equal(result.events.bags.status, 'pending');
+  });
+
+  test('a Blackjack tie shares the ladder like any individual event (spec §3.2)', () => {
+    const log = buildLog([
+      ...ROSTER.map((player) => ({ type: 'time', event: 'blackjack', player, value: 21 })),
+      { type: 'event_final', event: 'blackjack' },
+    ]);
+    const result = run(log);
+    for (const p of ROSTER) {
+      assert.equal(round1(result.events.blackjack.points[p]), 55);
+      assert.equal(result.events.blackjack.placement[p], 6);
+    }
+  });
+});
+
+// =======================================================================================
 // The knob
 // =======================================================================================
 
 describe('the knob', () => {
-  test('it multiplies individual events and leaves team events alone', () => {
+  test('it multiplies the knob-following individual events and leaves team events alone', () => {
     const at2 = run(append(GOLDEN_LOG, [{ type: 'knob', value: 2.0 }]));
     const at1 = run(append(GOLDEN_LOG, [{ type: 'knob', value: 1.0 }]));
 
     assert.equal(at2.events.swim.points.Lucas, rawPointsForRank(1, 10) * 2);
     assert.equal(at1.events.swim.points.Lucas, rawPointsForRank(1, 10));
+    assert.equal(at2.events.bags.points.Tyler, rawPointsForRank(1, 11) * 2);
+    assert.equal(at2.events.blackjack.points.Murph, rawPointsForRank(1, 11) * 2);
+    assert.equal(at2.events.swim.multiplier, 2);
     assert.equal(at2.events.wiffle.points.Murph, 100, 'Wiffle is never multiplied');
     assert.equal(at2.events.beerball.teamPoints.P1, 100);
     assert.equal(at2.events.volleyball.teamPoints.TW, 100);
   });
 
+  test('the Gauntlet is fixed at ×1.5 and ignores the knob entirely (Brad, 2026-08-28)', () => {
+    const at2 = run(append(GOLDEN_LOG, [{ type: 'knob', value: 2.0 }]));
+    const at1 = run(append(GOLDEN_LOG, [{ type: 'knob', value: 1.0 }]));
+    assert.equal(at2.events.gauntlet.points.Wyatt, G(1));
+    assert.equal(at1.events.gauntlet.points.Wyatt, G(1));
+    assert.equal(at2.events.gauntlet.points.Tyler, G(2), 'Tyler\'s pass-through rides the same fixed ladder');
+    assert.equal(at2.events.gauntlet.multiplier, 1.5);
+    assert.equal(at2.events.gauntlet.usesKnob, false);
+    assert.equal(at2.knob, 2, 'the live knob itself is still reported');
+  });
+
+  test('an override on a fixed-multiplier event uses that multiplier, not the knob', () => {
+    const log = append(GOLDEN_LOG, [
+      { type: 'knob', value: 2.0 },
+      { type: 'override', event: 'gauntlet', placements: [...ABLE], reason: 'timer dispute' },
+    ]);
+    const result = run(log);
+    assert.equal(result.events.gauntlet.points[ABLE[0]], G(1));
+    assert.equal(result.events.gauntlet.points[ABLE[1]], G(2));
+  });
+
   test('turning it reshuffles the board — that is the whole point', () => {
-    const low = run(append(GOLDEN_LOG, [{ type: 'knob', value: 1.0 }]));
-    const high = run(append(GOLDEN_LOG, [{ type: 'knob', value: 2.0 }]));
-    assert.notDeepEqual(low.players.map((p) => p.player), high.players.map((p) => p.player));
+    // Stu is team-heavy (Wiffle 100, last in the Swim); Lucas is individual-heavy (Wiffle 0,
+    // Swim 2nd = 88.9 × knob). At ×1.0 Stu leads; at ×2.0 Lucas does.
+    const swimOrder = ['Wyatt', 'Lucas', 'Murph', 'Yuyi', 'Helwig', 'Josh', 'Mitch', 'ATM', 'Brad', 'Stu'];
+    const log = buildLog([
+      { type: 'draft_assignment', event: 'wiffle', teams: WIFFLE_TEAMS },
+      { type: 'wiffle_result', event: 'wiffle', winner: 'B' }, // Stu's side
+      ...swimOrder.map((player, i) => ({ type: 'time', event: 'swim', player, value: 50 + i })),
+    ]);
+    const order = (knob) => run(append(log, [{ type: 'knob', value: knob }])).players.map((p) => p.player);
+    const low = order(1.0);
+    const high = order(2.0);
+    assert.ok(low.indexOf('Stu') < low.indexOf('Lucas'), 'at ×1.0 the team points carry Stu');
+    assert.ok(high.indexOf('Lucas') < high.indexOf('Stu'), 'at ×2.0 the swim carries Lucas');
+    assert.notDeepEqual(low, high);
   });
 
   test('the default is the calibrated 1.1 when no knob entry exists', () => {

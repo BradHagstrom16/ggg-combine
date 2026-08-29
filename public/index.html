@@ -29,7 +29,7 @@
       <div class="board-sub" id="subtitle">Connecting…</div>
     </div>
     <div class="chips">
-      <span class="chip knob" id="knob">INDIVIDUAL ×1.1</span>
+      <span class="chip knob" id="knob">INDIVIDUAL ×1.25 · GAUNTLET ×1.5</span>
       <span class="chip unfinalized" id="unfinal" hidden></span>
       <span class="age" id="age"></span>
     </div>
@@ -75,7 +75,7 @@
         playerHref: (name) => `/events#player=${encodeURIComponent(name)}`,
       });
       subtitleEl.textContent = progressSubtitle(result);
-      knobEl.textContent = knobChipText(result.knob);
+      knobEl.textContent = knobChipText(result.knob, result.events);
 
       const unfinalized = Object.values(result.events).filter((e) => e.status === 'unfinalized');
       unfinalEl.hidden = unfinalized.length === 0;

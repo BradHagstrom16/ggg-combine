@@ -25,7 +25,9 @@ test('eventsByDay groups the schedule into day sections in order', () => {
   // Super Volley Beer was added mid-combine (Brad, 2026-08-28) and played Friday; its column
   // is appended (order 7) so the six original columns never shift on the TV.
   assert.deepEqual(groups[0].ids, ['wiffle', 'beerball', 'supervolley']);
-  assert.deepEqual(groups[1].ids, ['swim', 'bags', 'volleyball', 'gauntlet']);
+  // Blackjack (added 2026-08-28) is appended as column 8; its Saturday slot before the Gauntlet
+  // lives in AGENDA, not in column order.
+  assert.deepEqual(groups[1].ids, ['swim', 'bags', 'volleyball', 'gauntlet', 'blackjack']);
 });
 
 test('eventHeadline: final / awaiting-finalize / in-progress / not-started', () => {
@@ -129,8 +131,8 @@ test('playerBreakdown: rank, per-event points, team + placement (how is Murph do
   const murph = playerBreakdown(g, mv, 'Murph');
   assert.equal(murph.rank, 1); // the champion
   assert.equal(murph.rankLabel, '1');
-  assert.equal(murph.total, 623.1);
-  assert.equal(murph.rows.length, 7);
+  assert.equal(murph.total, 764.2);
+  assert.equal(murph.rows.length, 8);
 
   const byId = Object.fromEntries(murph.rows.map((r) => [r.id, r]));
   assert.equal(byId.wiffle.cell.kind, 'scored');

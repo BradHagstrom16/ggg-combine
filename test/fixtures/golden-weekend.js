@@ -10,13 +10,17 @@
  *
  * ── The arithmetic, shown ──────────────────────────────────────────────────────────────
  *
- * Knob = 1.1 (the calibrated default, spec §3.1).
+ * Knob = 1.1 (the calibrated default, spec §3.1). Gauntlet is FIXED at ×1.5 and ignores the
+ * knob (Brad, 2026-08-28 — spec §3.1).
  *
- * Individual ladders, raw = 100 × (n−r)/(n−1), final = raw × 1.1:
- *   Swim/Gauntlet (n=10):  110, 880/9, 770/9, 660/9, 550/9, 440/9, 330/9, 220/9, 110/9, 0
+ * Individual ladders, raw = 100 × (n−r)/(n−1), final = raw × multiplier:
+ *   Swim (n=10, ×1.1):     110, 880/9, 770/9, 660/9, 550/9, 440/9, 330/9, 220/9, 110/9, 0
  *                       ≈  110, 97.7778, 85.5556, 73.3333, 61.1111, 48.8889, 36.6667,
  *                          24.4444, 12.2222, 0
- *   Bags (n=11):           110, 99, 88, 77, 66, 55, 44, 33, 22, 11, 0
+ *   Gauntlet (n=10, ×1.5): 150, 1200/9, 1050/9, 100, 750/9, 600/9, 50, 300/9, 150/9, 0
+ *                       ≈  150, 133.3333, 116.6667, 100, 83.3333, 66.6667, 50, 33.3333,
+ *                          16.6667, 0
+ *   Bags / Blackjack (n=11, ×1.1): 110, 99, 88, 77, 66, 55, 44, 33, 22, 11, 0
  *
  * WIFFLE — Team A (Murph, Lucas, Yuyi, Helwig, Wyatt + Tyler on the 6-side) beats Team B
  *   (Stu, Josh, Mitch, ATM, Brad). Winners 100, losers 0.
@@ -42,15 +46,20 @@
  *   Tyler picks TM (burn 4 = its captain Mitch; TW is ineligible, Wyatt is already burned)
  *   → 50.
  *
- * GAUNTLET — Wyatt, Stu, Murph, Lucas, Josh, Mitch, ATM, Yuyi, Brad, Helwig (1st→10th).
- *   Tyler picks Stu (burn 5) → 880/9 ≈ 97.7778.
+ * BLACKJACK (added mid-combine, Brad 2026-08-28; spec §4.8) — all 11 play, HIGHEST score wins,
+ *   × knob like Bags: Murph, Lucas, Wyatt, Tyler, Stu, Yuyi, Mitch, Josh, ATM, Helwig, Brad
+ *   (1st→11th). Played Saturday before the Gauntlet. (Order chosen so the finishing order
+ *   below is unchanged from the six-event weekend.)
+ *
+ * GAUNTLET — Wyatt, Stu, Murph, Lucas, Josh, Mitch, ATM, Yuyi, Brad, Helwig (1st→10th), ×1.5.
+ *   Tyler picks Stu (burn 5) → 1200/9 ≈ 133.3333.
  *
  * Burns, all unique per spec §6.1: Brad, Wyatt, Lucas, Mitch, Stu.
  *
  * Cross-check — total points awarded across the weekend:
  *   Wiffle 600 · Beer Ball 500 · Super Volley Beer 600 · Swim 550 + Tyler 110 · Bags 605
- *   · Volleyball 500 + Tyler 50 · Gauntlet 550 + Tyler 880/9  =  4162.7778, which is exactly
- *   the sum of the 11 totals below. The fixture closes.
+ *   · Volleyball 500 + Tyler 50 · Blackjack 605 · Gauntlet 750 + Tyler 1200/9  =  5003.3333,
+ *   which is exactly the sum of the 11 totals below. The fixture closes.
  */
 
 import { buildLog } from '../helpers.js';
@@ -122,6 +131,12 @@ const VOLLEYBALL_SETS = [
   { matchSlot: 3, setNo: 2, scores: { TH: 19, TW: 21 } },
 ];
 
+/** Blackjack is a SCORE, highest wins, all 11 (spec §4.8, Brad 2026-08-28). */
+const BLACKJACK_SCORES = [
+  ['Murph', 25], ['Lucas', 24], ['Wyatt', 23], ['Tyler', 22], ['Stu', 21], ['Yuyi', 20],
+  ['Mitch', 19], ['Josh', 18], ['ATM', 17], ['Helwig', 16], ['Brad', 15],
+];
+
 const GAUNTLET_TIMES = [
   ['Wyatt', 45.0], ['Stu', 47.5], ['Murph', 48.0], ['Lucas', 49.2], ['Josh', 51.0],
   ['Mitch', 52.5], ['ATM', 54.0], ['Yuyi', 56.0], ['Brad', 60.0], ['Helwig', 65.0],
@@ -161,7 +176,11 @@ export const GOLDEN_LOG = buildLog([
   ...VOLLEYBALL_SETS.map((s) => ({ type: 'volleyball_set', event: 'volleyball', ...s })),
   { type: 'event_final', event: 'volleyball' },
 
-  // Saturday — Gauntlet finale
+  // Saturday — Blackjack (all 11, before the Gauntlet)
+  ...BLACKJACK_SCORES.map(([player, value]) => ({ type: 'time', event: 'blackjack', player, value })),
+  { type: 'event_final', event: 'blackjack' },
+
+  // Saturday — Gauntlet finale (fixed ×1.5)
   { type: 'tyler_pick', stage: 'gauntlet', target: 'Stu' },
   ...GAUNTLET_TIMES.map(([player, value]) => ({ type: 'time', event: 'gauntlet', player, value })),
   { type: 'event_final', event: 'gauntlet' },
@@ -174,18 +193,18 @@ export const EXPECTED = {
   burns: ['Brad', 'Wyatt', 'Lucas', 'Mitch', 'Stu'],
   order: ['Murph', 'Lucas', 'Wyatt', 'Tyler', 'Stu', 'Yuyi', 'Mitch', 'Josh', 'ATM', 'Helwig', 'Brad'],
   totals: {
-    // Wiffle + Beer Ball + SVB + Swim + Bags + Volleyball + Gauntlet
-    Murph: 623.1,   // 100 + 75 + 100 + 770/9 + 77 + 100 + 770/9
-    Lucas: 613.3,   // 100 + 75 + 100 + 110   + 55 + 100 + 660/9
-    Wyatt: 595.8,   // 100 +  0 + 100 + 880/9 + 88 + 100 + 110
-    Tyler: 567.8,   // 100 +  0 + 100 + 110   + 110 + 50 + 880/9   (Wiffle, SVB, Bags his own, the rest backed)
-    Stu: 520.1,     //   0 + 100 + 100 + 660/9 + 99 +  50 + 880/9
-    Yuyi: 395.3,    // 100 + 100 + 100 + 440/9 + 22 +   0 + 220/9
-    Mitch: 254.0,   //   0 +  50 +   0 + 550/9 + 44 +  50 + 440/9
-    Josh: 251.6,    //   0 +  50 +   0 + 220/9 + 66 +  50 + 550/9
-    ATM: 131.3,     //   0 +  25 +   0 + 330/9 + 33 +   0 + 330/9
-    Helwig: 125.0,  // 100 +  25 +   0 +     0 +  0 +   0 + 0
-    Brad: 85.4,     //   0 +   0 +   0 + 110/9 + 11 +  50 + 110/9
+    // Wiffle + Beer Ball + SVB + Swim + Bags + Volleyball + Blackjack + Gauntlet(×1.5)
+    Murph: 764.2,   // 100 + 75 + 100 + 770/9 + 77 + 100 + 110 + 1050/9
+    Lucas: 739.0,   // 100 + 75 + 100 + 110   + 55 + 100 +  99 + 100
+    Wyatt: 723.8,   // 100 +  0 + 100 + 880/9 + 88 + 100 +  88 + 150
+    Tyler: 680.3,   // 100 +  0 + 100 + 110   + 110 + 50 +  77 + 1200/9   (Wiffle, SVB, Bags, Blackjack his own, the rest backed)
+    Stu: 621.7,     //   0 + 100 + 100 + 660/9 + 99 +  50 +  66 + 1200/9
+    Yuyi: 459.2,    // 100 + 100 + 100 + 440/9 + 22 +   0 +  55 + 300/9
+    Mitch: 315.8,   //   0 +  50 +   0 + 550/9 + 44 +  50 +  44 + 600/9
+    Josh: 306.8,    //   0 +  50 +   0 + 220/9 + 66 +  50 +  33 + 750/9
+    ATM: 166.7,     //   0 +  25 +   0 + 330/9 + 33 +   0 +  22 + 50
+    Helwig: 136.0,  // 100 +  25 +   0 +     0 +  0 +   0 +  11 + 0
+    Brad: 89.9,     //   0 +   0 +   0 + 110/9 + 11 +  50 +   0 + 150/9
   },
   /** Wiffle points prove the winner-take-all split including Tyler, who plays. */
   wiffle: {
@@ -201,8 +220,8 @@ export const EXPECTED = {
   beerballPlacements: ['P1', 'P2', 'P3', 'P4', 'P5'],
   /** Volleyball placement order (wins alone separates all three). */
   volleyballPlacements: ['TW', 'TM', 'TH'],
-  /** Spec §7: Tyler's Swim/Gauntlet placements are his picked players'. */
-  tylerPlacements: { swim: 1, bags: 1, gauntlet: 2 },
+  /** Spec §7: Tyler's Swim/Gauntlet placements are his picked players'; Bags/Blackjack his own. */
+  tylerPlacements: { swim: 1, bags: 1, blackjack: 4, gauntlet: 2 },
 };
 
-export { WIFFLE_TEAMS, SUPERVOLLEY_TEAMS, BEERBALL_PAIRS, VOLLEYBALL_TEAMS, BEERBALL_GAMES, VOLLEYBALL_SETS, SWIM_TIMES, BAGS_SCORES, GAUNTLET_TIMES };
+export { WIFFLE_TEAMS, SUPERVOLLEY_TEAMS, BEERBALL_PAIRS, VOLLEYBALL_TEAMS, BEERBALL_GAMES, VOLLEYBALL_SETS, SWIM_TIMES, BAGS_SCORES, BLACKJACK_SCORES, GAUNTLET_TIMES };

@@ -707,6 +707,11 @@ function usableOverride(override, eventId, addIssue, validIds) {
 
 function scoreIndividualEvent(eventId, { latest, effective, knob, addIssue }) {
   const config = EVENTS[eventId];
+  // Spec §3.1: an event with a fixed `multiplier` (Gauntlet ×1.5, Brad 2026-08-28) ignores the
+  // knob; every other individual event follows it. Resolved once here — the only two places
+  // points are multiplied are below, and both read this.
+  const usesKnob = !Number.isFinite(config.multiplier);
+  const multiplier = usesKnob ? knob : config.multiplier;
   const finalized = latest.has(`event_final:${eventId}`);
   const override = usableOverride(latest.get(`override:${eventId}`), eventId, addIssue, config.participants);
 
@@ -736,6 +741,7 @@ function scoreIndividualEvent(eventId, { latest, effective, knob, addIssue }) {
     type: 'individual', status, complete, finalized,
     overridden: Boolean(override), overrideReason: override?.reason ?? null,
     manualRequired: false, missing, values,
+    multiplier, usesKnob,
   };
 
   if (status === 'pending') {
@@ -744,11 +750,11 @@ function scoreIndividualEvent(eventId, { latest, effective, knob, addIssue }) {
 
   if (override) {
     // An override states the finishing order outright; points follow the §3.2 formula from
-    // those positions so the knob still applies exactly as it would have.
+    // those positions so the multiplier still applies exactly as it would have.
     const points = {};
     const placement = {};
     override.placements.forEach((player, i) => {
-      points[player] = rawPointsForRank(i + 1, config.participants.length) * knob;
+      points[player] = rawPointsForRank(i + 1, config.participants.length) * multiplier;
       placement[player] = i + 1;
     });
     for (const player of config.participants) {
@@ -758,7 +764,7 @@ function scoreIndividualEvent(eventId, { latest, effective, knob, addIssue }) {
   }
 
   const { points, placement, blanks } = rankIndividual({
-    values, participants: config.participants, direction: config.direction, knob,
+    values, participants: config.participants, direction: config.direction, knob: multiplier,
   });
 
   if (finalized && blanks.length) {
@@ -1001,7 +1007,8 @@ function buildPlayerRows(events) {
       };
     }
 
-    // Spec §7 tiebreak column: average placement across the three individual events.
+    // Spec §7 tiebreak column: average placement across every individual event (four since
+    // Blackjack, 2026-08-28).
     const placements = INDIVIDUAL_EVENTS
       .map((id) => events[id].placement?.[player])
       .filter((p) => Number.isFinite(p));
@@ -1020,8 +1027,9 @@ function buildPlayerRows(events) {
 }
 
 /**
- * Spec §7: champion = highest total. Tie → lowest average placement across the three
- * individual events. Still tied → head-to-head beer pong, recorded as `championship_tiebreak`.
+ * Spec §7: champion = highest total. Tie → lowest average placement across every individual
+ * event (four since Blackjack, 2026-08-28). Still tied → head-to-head beer pong, recorded as
+ * `championship_tiebreak`.
  *
  * Every total comparison happens at 1 decimal (`totalRounded`). Comparing raw floats would let
  * 248.29999999999998 quietly beat 248.3 and rob the weekend of a genuine tie — and a tie for
@@ -1052,12 +1060,14 @@ function resolveChampionship(players, latest, addIssue) {
     return { player: leaders[0].player, resolvedBy: 'total', contenders: leaders.map((l) => l.player) };
   }
 
-  // Tie on total → lowest average placement across THE THREE individual events.
+  // Tie on total → lowest average placement across EVERY individual event.
   //
-  // All three, from every tied leader, or the rule does not apply (Brad, 2026-08-13). An average
-  // over two events is simply not the same quantity as an average over three, so a leader missing
+  // All of them, from every tied leader, or the rule does not apply (Brad, 2026-08-13). An average
+  // over three events is simply not the same quantity as an average over four, so a leader missing
   // one — Tyler, when he never picked for the Gauntlet — can neither win nor lose the title on the
   // comparison. The chain skips straight to beer pong, which is a thing Brad can actually hold.
+  // Corollary since Blackjack made it four (2026-08-28): until Blackjack is finalized, no tie is
+  // comparable. Blackjack precedes the Gauntlet finale, so that never bites a real title.
   let contenders = leaders;
   const comparable = leaders.every((l) => l.individualPlacements === INDIVIDUAL_EVENTS.length);
   if (comparable) {

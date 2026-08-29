@@ -1,7 +1,7 @@
 # GGG Combine 2026
 
 Live standings and scoring for the 2nd annual GGG fantasy football combine — 11 players,
-7 scored events (6 planned, plus Super Volley Beer added on the day), one lakeside weekend (Aug 28–29, 2026), ending in the league's fantasy draft.
+8 scored events (6 planned, plus Super Volley Beer and Blackjack added on the day), one lakeside weekend (Aug 28–29, 2026), ending in the league's fantasy draft.
 
 The commissioner enters raw results from his phone. Everything downstream — ranks, the
 Individual Multiplier, round-robin standings, Tyler's GM points, tiebreak columns, the champion
