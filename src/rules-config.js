@@ -26,7 +26,11 @@ export const GM = 'Tyler';
 export const ABLE = ROSTER.filter((p) => p !== GM);
 
 /** Spec §3.1 — the Individual Multiplier ("the knob").
- *  Default 1.1 is CALIBRATED (200k-run Monte Carlo, spec §3.1). Do not re-derive it. */
+ *  Default 1.1 is CALIBRATED (200k-run Monte Carlo, spec §3.1). Do not re-derive it.
+ *
+ *  An individual event may carry a fixed `multiplier` instead (Brad, 2026-08-28: Gauntlet is
+ *  ×1.5 and does NOT follow the knob). Events without one follow the live knob, which Brad set
+ *  to 1.25 for the event. The knob stays live so the rest can still be rebalanced mid-weekend. */
 export const KNOB = { default: 1.1, min: 1.0, max: 2.0, step: 0.05 };
 
 /** Rank directions for individual events.
@@ -158,6 +162,8 @@ export const EVENTS = {
     // Spec §4.6: 10 able players, timed, lower is better.
     participants: ABLE,
     direction: DIRECTION.LOWER,
+    // Brad, 2026-08-28 (spec §3.1): the finale is worth ×1.5, fixed — the knob does not apply.
+    multiplier: 1.5,
     unit: 'seconds',
     tylerPlays: false,
   },
@@ -179,6 +185,21 @@ export const EVENTS = {
     teamCount: 2,
     tylerPlays: true,
   },
+  blackjack: {
+    id: 'blackjack',
+    order: 8, // appended, so the existing columns never shift on the TV mid-weekend
+    label: 'Blackjack',
+    short: 'BJ',
+    type: 'individual',
+    day: 'Saturday',
+    // Brad, 2026-08-28 (spec §4.8): added mid-combine. ALL 11 play, including Tyler. Highest
+    // score wins, × the live knob like Bags. Played Saturday before the Gauntlet (see AGENDA —
+    // column order is `order`, schedule position is the agenda).
+    participants: ROSTER,
+    direction: DIRECTION.HIGHER,
+    unit: 'points',
+    tylerPlays: true,
+  },
 };
 
 /** Event ids in schedule order. */
@@ -186,7 +207,7 @@ export const EVENT_ORDER = Object.values(EVENTS)
   .sort((a, b) => a.order - b.order)
   .map((e) => e.id);
 
-/** The three knob-multiplied events (spec §3: "individual events are multiplied"). */
+/** The individual (rank-scored, multiplied) events — four since Blackjack (spec §3, §4.8). */
 export const INDIVIDUAL_EVENTS = EVENT_ORDER.filter((id) => EVENTS[id].type === 'individual');
 
 export const TEAM_EVENTS = EVENT_ORDER.filter((id) => EVENTS[id].type === 'team');
@@ -202,6 +223,7 @@ export const TYLER_BACKING = {
   wiffle: { mode: 'plays' },
   bags: { mode: 'plays' },
   supervolley: { mode: 'plays' }, // spec §4.7 (Brad, 2026-08-28)
+  blackjack: { mode: 'plays' }, // spec §4.8 (Brad, 2026-08-28)
   beerball: { mode: 'derived', unit: 'pair', burns: 'allMembers' },
   swim: { mode: 'pick', unit: 'player', burns: 'target' },
   volleyball: { mode: 'pick', unit: 'team', burns: 'captain' },
@@ -274,6 +296,7 @@ export const AGENDA = [
       { label: 'Volleyball draft', kind: 'draft' },
       { label: "Tyler's team pick locks", kind: 'pick', note: 'burn 4' },
       { label: 'Volleyball', kind: 'event', event: 'volleyball' },
+      { label: 'Blackjack', kind: 'event', event: 'blackjack', note: 'All 11 · added 2026-08-28' },
       { label: "Tyler's Gauntlet pick locks", kind: 'pick', note: 'burn 5' },
       { label: 'Gauntlet', kind: 'event', event: 'gauntlet', note: 'Locked finale' },
       { label: 'Champion crowned', kind: 'ceremony', note: 'Tiebreaks per §7' },

@@ -183,7 +183,13 @@ export function individualBoard(result, eventId) {
     points: p in points ? points[p] : null,
     pending: !(p in values),
   })).sort((a, b) => (a.placement ?? 999) - (b.placement ?? 999) || a.player.localeCompare(b.player));
-  return { rows, direction: cfg.direction || null, unit: cfg.unit || null };
+  return {
+    rows,
+    direction: cfg.direction || null,
+    unit: cfg.unit || null,
+    // The multiplier this event actually scored at (fixed, or the live knob) — null until scored.
+    multiplier: Number.isFinite(ev.multiplier) ? ev.multiplier : null,
+  };
 }
 
 /* ---- Per-player drill-down --------------------------------------------------------------- */

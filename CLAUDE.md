@@ -1,7 +1,7 @@
 # GGG Combine 2026
 
 Live standings + scoring for the 2nd annual GGG fantasy football combine — 11 players,
-7 scored events (6 planned + Super Volley Beer, added mid-combine 2026-08-28), Aug 28–29 2026. Brad (commissioner) is the only writer; everyone else views
+8 scored events (6 planned + Super Volley Beer and Blackjack, added mid-combine 2026-08-28), Aug 28–29 2026. Brad (commissioner) is the only writer; everyone else views
 on a phone, and the standings are projected on a TV.
 
 ## Two standing rules
@@ -121,14 +121,14 @@ visible, audited fixes. Nothing is ever mutated or deleted.
 | Type | Fields | Latest-wins key |
 |---|---|---|
 | `draft_assignment` | event, teams/pairs with captains | (event) |
-| `time` | event, player, value — seconds (Swim/Gauntlet, lower better) or bag score (Bags, higher better) | (event, player) |
+| `time` | event, player, value — seconds (Swim/Gauntlet, lower better) or score (Bags/Blackjack, higher better) | (event, player) |
 | `wiffle_result` | event, winning team — the winner-take-all entry for Wiffle **and** Super Volley Beer (`event: 'supervolley'`); the type name is historical | (event) |
 | `beerball_game` | gameSlot 1–10, pairs, winner, beers per side (0.5 steps; winner 2, loser ≤1.5 — entry rule only, differential scoring unchanged) | (event, gameSlot) |
 | `volleyball_set` | matchSlot 1–3, setNo 1–3, scores | (event, matchSlot, setNo) |
 | `tyler_pick` | stage, target | (stage) — correctable until that stage's `event_final` |
 | `override` | event, final placements, reason | (event) — supersedes computation, ⚑-flagged |
 | `championship_tiebreak` | head-to-head beer pong winner | singleton |
-| `knob` | value (clamped 1.0–2.0, step 0.05, default 1.1) | singleton |
+| `knob` | value (clamped 1.0–2.0, step 0.05, default 1.1; set to 1.25 for the event) — applies to Swim/Bags/Blackjack; Gauntlet is fixed ×1.5 via `EVENTS.gauntlet.multiplier` (Brad, 2026-08-28) | singleton |
 | `event_final` | event | (event) — un-finalize = a correction voiding it |
 | `correction` | targets id, optional replacement | n/a |
 
@@ -136,10 +136,15 @@ visible, audited fixes. Nothing is ever mutated or deleted.
 
 - **Compare and display totals at 1 decimal.** Float dust must never silently defeat the §7
   tie detection — a tie for the championship is a *feature*, not a rounding artifact.
-- **§7's average-placement step needs all three individual placements, from every tied leader**
-  (Brad, 2026-08-13). An average over two events is not the same quantity as one over three, so a
-  leader missing one — Tyler, when he never picked for the Gauntlet — sends the chain straight to
-  beer pong rather than being ranked against it.
+- **§7's average-placement step needs every individual placement (four since Blackjack), from
+  every tied leader** (Brad, 2026-08-13). An average over three events is not the same quantity as
+  one over four, so a leader missing one — Tyler, when he never picked for the Gauntlet — sends the
+  chain straight to beer pong rather than being ranked against it. Corollary: until Blackjack is
+  finalized, no tie is comparable; Blackjack precedes the Gauntlet finale, so that never bites.
+- **Individual multipliers resolve once in `scoreIndividualEvent`:** an event with
+  `EVENTS[id].multiplier` (Gauntlet, ×1.5) ignores the knob; the rest use the live knob. The
+  event result carries `multiplier`/`usesKnob` and `knobChipText(knob, events)` derives the
+  `· GAUNTLET ×1.5` suffix from them — never hard-code which event is fixed.
 - **Round-robin ties use a group-wise resolver, not a pairwise comparator chain.** Head-to-head
   is non-transitive: a 3-way circular knot must be *detected* and flagged
   `manual-resolution-required` (Brad enters an `override`), never silently ordered.

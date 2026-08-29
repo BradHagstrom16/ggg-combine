@@ -29,7 +29,7 @@
       <div class="board-sub" id="subtitle">Connecting…</div>
     </div>
     <div class="chips">
-      <span class="chip knob" id="knob">INDIVIDUAL ×1.1</span>
+      <span class="chip knob" id="knob">INDIVIDUAL ×1.25 · GAUNTLET ×1.5</span>
       <span class="age" id="age"></span>
     </div>
   </div>
@@ -180,11 +180,12 @@
   }
 
   function individualResults(result, id) {
-    const { rows, direction, unit } = individualBoard(result, id);
+    const { rows, direction, unit, multiplier } = individualBoard(result, id);
     const wrap = h('div', { class: 'res' });
     // "better" wording follows the engine's direction; the column header follows the value type (unit).
     const better = direction === 'higher' ? 'higher better' : 'lower better';
-    wrap.appendChild(h('h4', {}, `Leaderboard · ${unit || 'time'}, ${better}`));
+    const mult = Number.isFinite(multiplier) ? ` · ×${String(Number(multiplier.toFixed(2)))}` : '';
+    wrap.appendChild(h('h4', {}, `Leaderboard · ${unit || 'time'}, ${better}${mult}`));
     if (!rows.some((r) => !r.pending)) { wrap.appendChild(h('p', { class: 'muted', style: 'font-size:13px' }, 'Not started yet.')); return wrap; }
     const tb = h('table', { class: 'tbl' },
       h('tr', {}, h('th', { class: 'l' }, '#'), h('th', { class: 'l' }, 'Player'), h('th', {}, unit === 'points' ? 'Score' : 'Time'), h('th', {}, 'Pts')));
@@ -306,7 +307,7 @@
       lastResult = score(eff);
       lastMovement = movementSinceLastEvent(eff);
       subtitleEl.textContent = progressSubtitle(lastResult);
-      knobEl.textContent = knobChipText(lastResult.knob);
+      knobEl.textContent = knobChipText(lastResult.knob, lastResult.events);
       const { errors } = issueSummary(lastResult.issues);
       issuesEl.hidden = errors.length === 0;
       issuesEl.textContent = errors.length ? `⚠ ${errors.map(issueText).join(' · ')}` : '';
