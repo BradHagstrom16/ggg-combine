@@ -126,43 +126,34 @@ test('burnTracker: count, filled vs open slots, straight off the ledger', () => 
   assert.equal(t.slots[0].player, 'Mitch');
   const volley = t.slots.find((s) => s.stage === 'volleyball');
   assert.equal(volley.filled, false);
-  assert.equal(volley.eligibleCount, 1); // only one team left
+  // Brad, 2026-08-28: burns need not be unique, so burned captains stay pickable — all 3 teams.
+  assert.equal(volley.eligibleCount, 3);
+  assert.equal('hasDuplicates' in t, false, 'the duplicate concept is gone from the tracker');
 });
 
-test('burnChooser (volleyball): two captains burned → exactly one eligible team, with reasons', () => {
+test('burnChooser (volleyball): burned captains stay pickable — burns need not be unique (Brad, 2026-08-28)', () => {
   const chooser = burnChooser(score(burnScenario()), 'volleyball');
   assert.equal(chooser.unit, 'team');
-  assert.equal(chooser.eligibleCount, 1);
-
-  const wyatt = chooser.options.find((o) => o.id === 'teamWyatt');
-  const mitch = chooser.options.find((o) => o.id === 'teamMitch');
-  const helwig = chooser.options.find((o) => o.id === 'teamHelwig');
-  assert.equal(wyatt.eligible, true);
-  assert.equal(wyatt.reason, null);
-  assert.equal(mitch.eligible, false);
-  assert.match(mitch.reason, /Mitch/); // reason names the burned captain
-  assert.match(mitch.reason, /Beer Ball/); // ...and which stage burned him
-  assert.equal(helwig.eligible, false);
-  assert.match(helwig.reason, /Helwig/);
+  assert.equal(chooser.eligibleCount, 3);
+  for (const id of ['teamWyatt', 'teamMitch', 'teamHelwig']) {
+    const o = chooser.options.find((x) => x.id === id);
+    assert.equal(o.eligible, true, `${id} is pickable`);
+    assert.equal(o.reason, null);
+  }
+  // The chooser still tells Brad who the pick burns, it just never refuses.
+  assert.equal(chooser.options.find((o) => o.id === 'teamMitch').burns, 'Mitch');
 });
 
-test('burnChooser (gauntlet, a player stage): burned players are disabled with a reason', () => {
+test('burnChooser (gauntlet, a player stage): every able player is eligible, even one already burned', () => {
   const chooser = burnChooser(score(burnScenario()), 'gauntlet');
   assert.equal(chooser.unit, 'player');
   assert.equal(chooser.options.length, ABLE.length);
-  assert.equal(chooser.eligibleCount, ABLE.length - 3); // minus Mitch, Helwig, Lucas
-
-  const mitch = chooser.options.find((o) => o.id === 'Mitch');
-  assert.equal(mitch.eligible, false);
-  assert.match(mitch.reason, /already burned/);
-  assert.match(mitch.reason, /Beer Ball/);
-
-  const lucas = chooser.options.find((o) => o.id === 'Lucas');
-  assert.equal(lucas.eligible, false);
-  assert.match(lucas.reason, /Swim/); // burned by the Swim pick, not Beer Ball
-
-  const wyatt = chooser.options.find((o) => o.id === 'Wyatt');
-  assert.equal(wyatt.eligible, true);
+  assert.equal(chooser.eligibleCount, ABLE.length); // Mitch, Helwig, Lucas are burned AND still pickable
+  for (const id of ['Mitch', 'Lucas', 'Wyatt']) {
+    const o = chooser.options.find((x) => x.id === id);
+    assert.equal(o.eligible, true, `${id} is pickable`);
+    assert.equal(o.reason, null);
+  }
 });
 
 test('burnChooser reflects a made pick as selected', () => {

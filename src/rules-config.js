@@ -66,6 +66,8 @@ export const EVENTS = {
     short: 'Wiffle',
     type: 'team',
     day: 'Friday',
+    // How the result is entered/scored: a single winner-take-all `wiffle_result` entry.
+    result: 'winner',
     // Spec §4.1: all 11 play — 6v5, Tyler always on the 6-side.
     participants: ROSTER,
     captains: ['Murph', 'Stu'],
@@ -80,6 +82,7 @@ export const EVENTS = {
   beerball: {
     id: 'beerball',
     order: 2,
+    result: 'beerball', // round robin of beerball_game entries
     label: 'Beer Ball',
     short: 'Beer Ball',
     type: 'team',
@@ -126,6 +129,7 @@ export const EVENTS = {
   volleyball: {
     id: 'volleyball',
     order: 5,
+    result: 'volleyball', // round robin of volleyball_set entries
     label: 'Volleyball',
     short: 'Volley',
     type: 'team',
@@ -157,6 +161,24 @@ export const EVENTS = {
     unit: 'seconds',
     tylerPlays: false,
   },
+  supervolley: {
+    id: 'supervolley',
+    order: 7, // appended, so the six original columns never shift on the TV mid-weekend
+    label: 'Super Volley Beer',
+    short: 'SVB',
+    type: 'team',
+    day: 'Friday',
+    result: 'winner',
+    // Brad, 2026-08-28 (spec §4.7): an ad-hoc 5v5 team game added mid-combine. Scored exactly
+    // like Wiffle — 2 teams, winner-take-all, and Tyler PLAYS (on the 6-side), so he earns his
+    // own team's result with no backing and no burn.
+    participants: ROSTER,
+    captains: ['Brad', 'Stu'],
+    placementPoints: [100, 0],
+    tiebreakRules: ['wins'],
+    teamCount: 2,
+    tylerPlays: true,
+  },
 };
 
 /** Event ids in schedule order. */
@@ -179,6 +201,7 @@ export const TEAM_EVENTS = EVENT_ORDER.filter((id) => EVENTS[id].type === 'team'
 export const TYLER_BACKING = {
   wiffle: { mode: 'plays' },
   bags: { mode: 'plays' },
+  supervolley: { mode: 'plays' }, // spec §4.7 (Brad, 2026-08-28)
   beerball: { mode: 'derived', unit: 'pair', burns: 'allMembers' },
   swim: { mode: 'pick', unit: 'player', burns: 'target' },
   volleyball: { mode: 'pick', unit: 'team', burns: 'captain' },
@@ -239,6 +262,7 @@ export const AGENDA = [
       { label: 'Wiffle Ball', kind: 'event', event: 'wiffle', note: 'Combine opener' },
       { label: 'Beer Ball draft', kind: 'draft', note: 'Shithead sets order 2–5 · Tyler snakes 1st/6th · burns 1–2' },
       { label: 'Beer Ball', kind: 'event', event: 'beerball' },
+      { label: 'Super Volley Beer', kind: 'event', event: 'supervolley', note: 'Added 2026-08-28 · 5v5, winner-take-all' },
     ],
   },
   {

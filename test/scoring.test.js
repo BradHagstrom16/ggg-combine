@@ -15,7 +15,7 @@ import { score, effectiveLog, resolveGroup, rankIndividual, entryKey } from '../
 import { clampKnob, round1, rawPointsForRank, KNOB, ABLE, ROSTER } from '../src/rules-config.js';
 import { buildLog, append, row, totals, codes } from './helpers.js';
 import {
-  GOLDEN_LOG, EXPECTED, WIFFLE_TEAMS, BEERBALL_PAIRS, VOLLEYBALL_TEAMS,
+  GOLDEN_LOG, EXPECTED, WIFFLE_TEAMS, SUPERVOLLEY_TEAMS, BEERBALL_PAIRS, VOLLEYBALL_TEAMS,
 } from './fixtures/golden-weekend.js';
 
 const run = (log) => score(effectiveLog(log));
@@ -45,9 +45,20 @@ describe('golden weekend (hand-computed, spec-derived)', () => {
     assert.equal(result.championship.resolvedBy, EXPECTED.championResolvedBy);
   });
 
-  test('the weekend closes: awarded points sum to 3562.7778', () => {
+  test('the weekend closes: awarded points sum to 4162.7778', () => {
     const sum = result.players.reduce((acc, p) => acc + p.total, 0);
-    assert.equal(round1(sum), 3562.8);
+    assert.equal(round1(sum), 4162.8);
+  });
+
+  test('Super Volley Beer is winner-take-all like Wiffle and Tyler earns his own 100', () => {
+    assert.deepEqual(
+      Object.fromEntries(Object.keys(EXPECTED.supervolley).map((p) => [p, result.events.supervolley.points[p]])),
+      EXPECTED.supervolley,
+    );
+    assert.equal(result.events.supervolley.status, 'final');
+    assert.equal(result.events.supervolley.winner, 'SA');
+    // Tyler PLAYS here (no backing, no burn) — nothing is written into his backing summary.
+    assert.equal(result.events.supervolley.tylerSource, undefined);
   });
 
   test('Wiffle is winner-take-all and Tyler earns his own 100', () => {
@@ -74,11 +85,9 @@ describe('golden weekend (hand-computed, spec-derived)', () => {
     assert.equal(result.events.gauntlet.points.Tyler, result.events.gauntlet.points.Stu);
   });
 
-  test('all five burns are recorded, in schedule order, all unique', () => {
+  test('all five burns are recorded, in schedule order', () => {
     assert.deepEqual(result.burns.slots.map((s) => s.player), EXPECTED.burns);
-    assert.equal(result.burns.duplicates.length, 0);
     assert.equal(result.burns.complete, true);
-    assert.equal(new Set(EXPECTED.burns).size, 5);
   });
 
   test('every event is final and nothing needs manual resolution', () => {
@@ -95,16 +104,19 @@ describe('golden weekend (hand-computed, spec-derived)', () => {
 // =======================================================================================
 
 describe('spec §10 validation rules', () => {
-  test('§10.1 — a duplicate burn is blocked and named', () => {
-    // Tyler's pair burns Brad + Wyatt; picking Brad again for Swim is illegal.
+  test('§10.1 (Brad, 2026-08-28) — a repeat burn is recorded, never refused or flagged', () => {
+    // Tyler's pair burns Brad + Wyatt; picking Brad again for Swim used to be illegal (§6.1
+    // uniqueness). Brad dropped that rule mid-combine: the ledger records Brad twice and the
+    // board shows no error.
     const log = buildLog([
       { type: 'draft_assignment', event: 'beerball', teams: BEERBALL_PAIRS },
       { type: 'tyler_pick', stage: 'swim', target: 'Brad' },
     ]);
     const result = run(log);
-    assert.ok(codes(result).includes('duplicate-burn'));
-    assert.equal(result.burns.duplicates[0].player, 'Brad');
-    assert.equal(result.burns.complete, false);
+    assert.equal(codes(result).includes('duplicate-burn'), false);
+    assert.deepEqual(result.burns.slots.filter((s) => s.player === 'Brad').map((s) => s.stage), ['beerball', 'swim']);
+    assert.equal(result.burns.slots.find((s) => s.stage === 'swim').duplicateOf, null);
+    assert.equal(result.burns.duplicates, undefined, 'the duplicate concept is gone from the ledger');
   });
 
   test('§10.2 — a player on two teams in one event is an error', () => {
@@ -820,25 +832,89 @@ describe('volleyball best-of-3', () => {
 });
 
 // =======================================================================================
+// Super Volley Beer — the 7th event, added mid-combine (Brad, 2026-08-28)
+// =======================================================================================
+
+describe('Super Volley Beer (spec §4.7)', () => {
+  test('scores winner-take-all through the event-scoped wiffle_result entry, Tyler playing', () => {
+    const log = buildLog([
+      { type: 'draft_assignment', event: 'supervolley', teams: SUPERVOLLEY_TEAMS },
+      { type: 'wiffle_result', event: 'supervolley', winner: 'SB' },
+    ]);
+    const result = run(log);
+    const ev = result.events.supervolley;
+    assert.equal(ev.status, 'unfinalized');
+    assert.equal(ev.winner, 'SB');
+    for (const p of ['Mitch', 'Josh', 'ATM', 'Helwig', 'Brad']) assert.equal(ev.points[p], 100, p);
+    for (const p of ['Murph', 'Lucas', 'Wyatt', 'Stu', 'Yuyi', 'Tyler']) assert.equal(ev.points[p], 0, p);
+    assert.equal(row(result, 'Tyler').byEvent.supervolley.pending, false);
+    assert.equal(round1(row(result, 'Brad').total), 100);
+
+    const final = run(append(log, [{ type: 'event_final', event: 'supervolley' }]));
+    assert.equal(final.events.supervolley.status, 'final');
+  });
+
+  test('its winner entry never leaks into Wiffle, and Wiffle\'s never into it', () => {
+    const log = buildLog([
+      { type: 'draft_assignment', event: 'wiffle', teams: WIFFLE_TEAMS },
+      { type: 'draft_assignment', event: 'supervolley', teams: SUPERVOLLEY_TEAMS },
+      { type: 'wiffle_result', event: 'supervolley', winner: 'SA' },
+    ]);
+    const result = run(log);
+    assert.equal(result.events.supervolley.winner, 'SA');
+    assert.equal(result.events.wiffle.winner, null);
+    assert.equal(result.events.wiffle.status, 'pending');
+
+    const both = run(append(log, [{ type: 'wiffle_result', event: 'wiffle', winner: 'B' }]));
+    assert.equal(both.events.wiffle.winner, 'B');
+    assert.equal(both.events.supervolley.winner, 'SA');
+  });
+
+  test('undrafted, it is pending and adds nothing — the six-event weekend is untouched', () => {
+    const sixEvent = GOLDEN_LOG.filter((e) => e.event !== 'supervolley');
+    const result = run(sixEvent);
+    assert.equal(result.events.supervolley.status, 'pending');
+    assert.equal(row(result, 'Murph').byEvent.supervolley.pending, true);
+    assert.equal(round1(row(result, 'Murph').total), 523.1);
+    assert.deepEqual(result.issues.filter((i) => i.level === 'error'), []);
+  });
+
+  test('a drafted-but-unplayed winner event never reads volleyball sets', () => {
+    // The old team-scorer dispatch fell through to the volleyball scorer for any event that was
+    // not wiffle/beerball — and volleyballDetail reads EVERY volleyball_set in the log. With the
+    // real Volleyball decided, that would have scored SVB as a 2-way tie (50 each) and demanded
+    // manual resolution. It must simply stay pending.
+    const log = append(
+      GOLDEN_LOG.filter((e) => !(e.event === 'supervolley' && e.type !== 'draft_assignment')),
+      [],
+    );
+    const result = run(log);
+    assert.equal(result.events.supervolley.status, 'pending');
+    assert.equal(result.events.supervolley.manualRequired, false);
+    assert.equal(codes(result).includes('manual-resolution-required'), false);
+    assert.deepEqual(result.events.supervolley.points, {});
+  });
+});
+
+// =======================================================================================
 // Tyler: burns, pools, and the lock boundary
 // =======================================================================================
 
 describe("Tyler's burn ledger", () => {
-  test('the pool shrinks as the weekend progresses', () => {
+  test('the pool never shrinks — a burned player stays pickable (Brad, 2026-08-28)', () => {
     const log = buildLog([
       { type: 'draft_assignment', event: 'beerball', teams: BEERBALL_PAIRS }, // burns Brad, Wyatt
       { type: 'draft_assignment', event: 'volleyball', teams: VOLLEYBALL_TEAMS },
     ]);
     const result = run(log);
     const swimSlot = result.burns.slots.find((s) => s.stage === 'swim');
-    assert.equal(swimSlot.eligible.includes('Brad'), false);
-    assert.equal(swimSlot.eligible.includes('Wyatt'), false);
-    assert.equal(swimSlot.eligible.length, 8);
+    assert.deepEqual(swimSlot.eligible, ABLE);
+    assert.deepEqual(result.burns.burned, ['Brad', 'Wyatt'], 'the burns are still recorded for display');
   });
 
-  test('a volleyball pool can narrow to exactly one eligible team', () => {
-    // Burn Wyatt via the Beer Ball pair and Helwig via the Swim pick: of the three volleyball
-    // captains (Mitch, Helwig, Wyatt) only Mitch survives, so only Team Mitch may be picked.
+  test('every drafted volleyball team is pickable, burned captain or not', () => {
+    // Wyatt burned via the Beer Ball pair and Helwig via the Swim pick used to leave only Team
+    // Mitch. Uniqueness is gone: all three teams are offered.
     const log = buildLog([
       { type: 'draft_assignment', event: 'beerball', teams: BEERBALL_PAIRS },
       { type: 'draft_assignment', event: 'volleyball', teams: VOLLEYBALL_TEAMS },
@@ -846,15 +922,13 @@ describe("Tyler's burn ledger", () => {
     ]);
     const result = run(log);
     const volleySlot = result.burns.slots.find((s) => s.stage === 'volleyball');
-    assert.deepEqual(volleySlot.eligible, ['TM']);
+    assert.deepEqual(volleySlot.eligible, ['TM', 'TH', 'TW']);
   });
 
   test('picking a volleyball team burns its CAPTAIN only, never the whole roster', () => {
     const result = run(GOLDEN_LOG);
     // Team Mitch is Mitch, Stu, Josh, Brad — but only Mitch is burned by the pick.
     assert.deepEqual(result.burns.slots.map((s) => s.player), ['Brad', 'Wyatt', 'Lucas', 'Mitch', 'Stu']);
-    // Stu is on the picked team AND is later burned by the Gauntlet pick, which is legal.
-    assert.equal(result.burns.duplicates.length, 0);
   });
 
   test('a team pick made before its draft stays unresolved instead of burning nobody', () => {
@@ -881,11 +955,11 @@ describe("Tyler's burn ledger", () => {
     assert.equal(codes(healed).includes('pick-target-unknown'), false);
 
     // A pick naming a team the draft does not contain waits the same way — and now the pool it
-    // offers is the real one, minus the team whose captain is already burned.
+    // offers is the real one: every drafted team (burned captains stay pickable).
     const typo = append(drafted, [{ type: 'tyler_pick', stage: 'volleyball', target: 'TX' }]);
     const mistyped = run(typo).burns.slots.find((s) => s.stage === 'volleyball');
     assert.equal(mistyped.player, null);
-    assert.deepEqual(mistyped.eligible, ['TM', 'TH'], 'TW is out — Wyatt is already burned');
+    assert.deepEqual(mistyped.eligible, ['TM', 'TH', 'TW']);
   });
 
   test('a team whose captain is not a player has nobody to burn, so the pick waits', () => {
@@ -905,7 +979,7 @@ describe("Tyler's burn ledger", () => {
     assert.equal(result.burns.burned.includes('Mitchell'), false, 'a typo never becomes a burn');
     assert.equal(result.burns.complete, false);
     // Nor is a team nobody can burn offered as a pick in the first place.
-    assert.deepEqual(slot.eligible, ['TH'], "TM has no real captain; TW's is already burned");
+    assert.deepEqual(slot.eligible, ['TH', 'TW'], 'TM has no real captain; the other two are offered');
     assert.match(
       result.issues.find((i) => i.code === 'pick-target-unknown').message,
       /captain on the roster/,
@@ -928,7 +1002,7 @@ describe("Tyler's burn ledger", () => {
     assert.equal(slot.unresolvedTarget, 'Luke');
     assert.equal(result.burns.burned.includes('Luke'), false, 'a phantom never enters the ledger');
     assert.equal(result.burns.complete, false);
-    assert.deepEqual(slot.eligible, ABLE.filter((p) => !['Brad', 'Wyatt'].includes(p)));
+    assert.deepEqual(slot.eligible, ABLE);
 
     const issue = result.issues.find((i) => i.code === 'pick-target-unknown');
     assert.ok(issue, 'the bad name must surface');
@@ -938,10 +1012,11 @@ describe("Tyler's burn ledger", () => {
     assert.equal(row(result, 'Tyler').byEvent.swim.pending, true);
   });
 
-  test('a duplicate burn pays Tyler nothing until the pick is fixed', () => {
-    // Spec §6 makes the points and the burn the same act, and §6.1 requires all five burns to
-    // be unique — so picking Brad, whom his own Beer Ball pair already burned, is not a pick
-    // that can score. Showing him Brad's points would fold an illegal pick into the §7 total.
+  test('a repeat burn still pays Tyler (Brad, 2026-08-28)', () => {
+    // Until 2026-08-28, §6.1 made picking Brad — whom his own Beer Ball pair already burned —
+    // an illegal pick that paid nothing. Brad dropped uniqueness mid-combine (he had picked
+    // Mitch for Volleyball AND drafted Mitch into his Beer Ball pair): a repeat burn is an
+    // ordinary pick, and pays exactly like any other.
     const log = buildLog([
       { type: 'draft_assignment', event: 'beerball', teams: BEERBALL_PAIRS }, // burns Brad, Wyatt
       { type: 'tyler_pick', stage: 'swim', target: 'Brad' },
@@ -949,18 +1024,32 @@ describe("Tyler's burn ledger", () => {
     ]);
     const result = run(log);
 
-    assert.ok(codes(result).includes('duplicate-burn'));
-    assert.ok(result.events.swim.points.Brad > 0, 'Brad himself still scores, of course');
-    assert.equal('Tyler' in result.events.swim.points, false, 'but the illegal pick pays nothing');
-    assert.equal(row(result, 'Tyler').byEvent.swim.pending, true);
-    assert.equal(result.events.swim.placement.Tyler, undefined, 'and carries no §7 placement');
-    assert.equal(result.events.swim.tylerSource, null);
+    assert.equal(codes(result).includes('duplicate-burn'), false);
+    assert.equal(result.events.swim.points.Tyler, result.events.swim.points.Brad);
+    assert.equal(row(result, 'Tyler').byEvent.swim.pending, false);
+    assert.equal(result.events.swim.placement.Tyler, result.events.swim.placement.Brad, 'and the §7 placement passes through');
+    assert.deepEqual(result.events.swim.tylerSource, { kind: 'player', id: 'Brad' });
+    assert.deepEqual(result.issues.filter((i) => i.level === 'error'), []);
+  });
 
-    // Re-entering a legal pick heals it — latest-wins, no correction needed.
-    const healed = run(append(log, [{ type: 'tyler_pick', stage: 'swim', target: 'Lucas' }]));
-    assert.equal(codes(healed).includes('duplicate-burn'), false);
-    assert.equal(healed.events.swim.points.Tyler, healed.events.swim.points.Lucas);
-    assert.equal(healed.events.swim.placement.Tyler, healed.events.swim.placement.Lucas);
+  test('the live 2026-08-28 case: Volleyball pick AND Beer Ball pair both name Mitch, both pay', () => {
+    // What actually happened: Tyler picked Team Mitch (volleyball), then drafted Mitch + Brad as
+    // his Beer Ball pair. Both must pay — 50 (TM finished 2nd) and the pair's placement.
+    const pairs = BEERBALL_PAIRS.map((p) => (p.id === 'P5' ? { ...p, members: ['Mitch', 'Brad'] } : p.id === 'P3' ? { ...p, members: ['Josh', 'Wyatt'] } : p));
+    const log = buildLog([
+      ...GOLDEN_LOG.filter((e) => !(e.type === 'draft_assignment' && e.event === 'beerball')).map(({ id, uuid, ts, ...rest }) => rest),
+    ]);
+    // Re-insert the modified Beer Ball draft ahead of the games (position of the original).
+    const idx = GOLDEN_LOG.findIndex((e) => e.type === 'draft_assignment' && e.event === 'beerball');
+    const entries = [...log.map(({ id, uuid, ts, ...rest }) => rest)];
+    entries.splice(idx, 0, { type: 'draft_assignment', event: 'beerball', teams: pairs });
+    const result = run(buildLog(entries));
+
+    assert.equal(result.events.volleyball.points.Tyler, result.events.volleyball.teamPoints.TM);
+    assert.equal(result.events.beerball.points.Tyler, result.events.beerball.teamPoints.P5);
+    assert.deepEqual(result.burns.slots.filter((s) => s.player === 'Mitch').map((s) => s.stage), ['beerball', 'volleyball']);
+    assert.equal(codes(result).includes('duplicate-burn'), false);
+    assert.equal(result.burns.complete, true);
   });
 
   test('correcting a pick before the event recomputes the pool', () => {

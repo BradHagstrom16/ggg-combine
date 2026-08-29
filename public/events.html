@@ -47,6 +47,7 @@
   // Everything on this page is DERIVED from the log on each poll: raw entries → effectiveLog →
   // score() → view-models (src/events-view.js) → DOM. Nothing computed is stored. sync.js keeps
   // the last-good log fresh; a wifi blip keeps the last render on screen with an amber age stamp.
+  import { EVENTS } from '/src/rules-config.js';
   import { effectiveLog, score, movementSinceLastEvent } from '/src/scoring.js';
   import {
     formatCellPoints, formatTotal, movementArrow, knobChipText, ageLabel,
@@ -112,7 +113,7 @@
   /* ---- BY EVENT ---- */
   function teamRoster(id, result) {
     const ev = result.events[id];
-    const winnerId = id === 'wiffle' ? ev.winner : null;
+    const winnerId = (EVENTS[id] || {}).result === 'winner' ? ev.winner : null;
     const row = h('div', { class: 'teamrow' });
     for (const t of ev.teams || []) {
       row.appendChild(h('div', { class: `team-chip${winnerId && t.id === winnerId ? ' win' : ''}` },
@@ -146,8 +147,8 @@
     return wrap;
   }
 
-  function wiffleResults(result) {
-    const { winner, decided } = wiffleBoard(result);
+  function wiffleResults(result, id) {
+    const { winner, decided } = wiffleBoard(result, id);
     return h('div', { class: 'res' }, decided
       ? h('div', { class: 'winbanner' }, `Team ${winner.captain} won · 100 pts`)
       : h('div', { class: 'winbanner tbd' }, 'Not played yet'));
@@ -205,9 +206,10 @@
       body.appendChild(h('p', { class: 'muted', style: 'font-size:12px;margin:2px 0' }, `⚑ Manual result: ${hd.overrideReason}`));
     }
     if (hd.type === 'team') body.appendChild(teamRoster(id, result));
-    if (id === 'beerball') body.appendChild(beerballResults(result));
-    else if (id === 'wiffle') body.appendChild(wiffleResults(result));
-    else if (id === 'volleyball') body.appendChild(volleyballResults(result));
+    const kind = (EVENTS[id] || {}).result;
+    if (kind === 'beerball') body.appendChild(beerballResults(result));
+    else if (kind === 'winner') body.appendChild(wiffleResults(result, id));
+    else if (kind === 'volleyball') body.appendChild(volleyballResults(result));
     else body.appendChild(individualResults(result, id));
 
     const card = h('details', { class: 'event' },

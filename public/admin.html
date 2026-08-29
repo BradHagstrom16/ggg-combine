@@ -202,9 +202,9 @@
   function renderBurns() {
     const t = burnTracker(scored);
     burnsEl.replaceChildren(
-      h('div', { class: 'burns-title', html: `Tyler burn tracker — <b>${t.burnedCount} of ${t.total}</b> burned${t.hasDuplicates ? ' · ⚠ DUPLICATE' : ''}` }),
+      h('div', { class: 'burns-title', html: `Tyler burn tracker — <b>${t.burnedCount} of ${t.total}</b> burned` }),
       ...t.slots.map((s) =>
-        h('span', { class: `slot${s.filled ? '' : ' open'}${s.duplicate ? ' dup' : ''}`, text: slotLabel(s) })),
+        h('span', { class: `slot${s.filled ? '' : ' open'}`, text: slotLabel(s) })),
     );
   }
   function renderKnob() {
@@ -229,7 +229,7 @@
     switch (e.type) {
       case 'time': return `${short(e.event)} — ${e.player} ${e.value}`;
       case 'draft_assignment': return `${short(e.event)} draft`;
-      case 'wiffle_result': return `Wiffle winner`;
+      case 'wiffle_result': return `${short(e.event ?? 'wiffle')} winner`;
       case 'beerball_game': return `Beer Ball game ${e.gameSlot}`;
       case 'volleyball_set': return `Volleyball m${e.matchSlot} set ${e.setNo}`;
       case 'tyler_pick': return `Tyler ${e.stage} pick → ${e.target}`;
@@ -309,7 +309,8 @@
     const hint = eventId === 'wiffle'
       ? h('p', { class: 'muted', style: 'font-size:12px' }, `${GM} is on the 6-player side. Sizes: 6 v 5.`)
       : shape.teamSizes ? h('p', { class: 'muted', style: 'font-size:12px' }, `Team sizes: ${shape.teamSizes.join(' / ')}.`)
-      : h('p', { class: 'muted', style: 'font-size:12px' }, `${shape.teamCount} teams of ${shape.teamSize}.`);
+      : shape.teamSize ? h('p', { class: 'muted', style: 'font-size:12px' }, `${shape.teamCount} teams of ${shape.teamSize}.`)
+      : h('p', { class: 'muted', style: 'font-size:12px' }, `${shape.teamCount} teams.`);
     const save = h('button', { class: 'primary' }, `Save ${ev.short} draft`);
     save.addEventListener('click', () => {
       const teams = buildDraftTeams(captains, parts, assign, (c) => teamId(eventId, c));
@@ -353,17 +354,18 @@
       ...rows, save);
   }
 
-  function wiffleResultSubform() {
-    const teams = teamsOf('wiffle');
+  // Winner-take-all events (Wiffle, Super Volley Beer): one `wiffle_result` entry, event-scoped.
+  function wiffleResultSubform(eventId) {
+    const teams = teamsOf(eventId);
     if (!teams) return h('div', { class: 'subform' }, h('h3', { text: 'Winner' }), h('p', { class: 'muted', style: 'font-size:12px' }, 'Enter the draft first.'));
-    const current = scored.events.wiffle.winner || null;
+    const current = scored.events[eventId].winner || null;
     let chosen = current;
     const picks = teams.map((t) =>
       h('label', { class: `pick${chosen === t.id ? ' selected' : ''}` },
-        h('input', { type: 'radio', name: 'wiffleWinner', checked: chosen === t.id, onchange: () => { chosen = t.id; } }),
+        h('input', { type: 'radio', name: `${eventId}Winner`, checked: chosen === t.id, onchange: () => { chosen = t.id; } }),
         h('span', { text: `Team ${t.captain} — ${t.members.join(', ')}` })));
     const save = h('button', { class: 'primary' }, 'Save winner (100 / 0)');
-    save.addEventListener('click', () => { if (chosen) submit({ type: 'wiffle_result', event: 'wiffle', winner: chosen }, save); });
+    save.addEventListener('click', () => { if (chosen) submit({ type: 'wiffle_result', event: eventId, winner: chosen }, save); });
     return h('div', { class: 'subform' }, h('h3', { text: 'Winner (winner-take-all)' }), ...picks, save);
   }
 
@@ -511,7 +513,7 @@
     const cfg = EVENTS[eventId];
     const body = h('div', { class: 'event-body' });
     if (cfg.type === 'team') body.appendChild(draftSubform(eventId));
-    if (eventId === 'wiffle') body.appendChild(wiffleResultSubform());
+    if (cfg.result === 'winner') body.appendChild(wiffleResultSubform(eventId));
     if (eventId === 'beerball') body.appendChild(beerballGamesSubform());
     if (PICK_STAGES.includes(eventId)) body.appendChild(pickSubform(eventId));
     if (cfg.type === 'individual') body.appendChild(timesSubform(eventId));

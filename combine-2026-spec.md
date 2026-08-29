@@ -25,7 +25,7 @@ Stu, Murph, Tyler, Josh, Lucas, Mitch, Yuyi, ATM, Helwig, Brad, Wyatt
 
 ## 3. Events & Scoring Overview
 
-Six scored events. Three individual, three team. All events nominally worth 100 points; individual events are multiplied by the live **Individual Multiplier** (the "knob").
+Seven scored events. Three individual, four team. All events nominally worth 100 points; individual events are multiplied by the live **Individual Multiplier** (the "knob"). *(Originally six — Super Volley Beer was added mid-combine; Brad, 2026-08-28. See §4.7.)*
 
 | # | Event | Type | Who plays | Points |
 |---|-------|------|-----------|--------|
@@ -35,6 +35,7 @@ Six scored events. Three individual, three team. All events nominally worth 100 
 | 4 | Bags | Individual, timed | All 11 | rank-based × knob |
 | 5 | Volleyball | Team (3 teams: 4/3/3) | 10 able | 100 / 50 / 0 × 1 |
 | 6 | Gauntlet | Individual, timed | 10 able | rank-based × knob |
+| 7 | Super Volley Beer | Team (2 teams, 6v5) | All 11 (Tyler plays) | 100 / 0 × 1 |
 
 Golf is played Friday morning as an **exhibition — zero combine points**. It may appear on the agenda page but must never touch standings.
 
@@ -93,6 +94,14 @@ final_points = raw_points × knob
 ### 4.6 Gauntlet — Saturday finale (locked slot)
 - 10 able players, timed obstacle/relay-style individual event, lower is better. Tyler backs a player (§6).
 
+### 4.7 Super Volley Beer — added mid-combine (Brad, 2026-08-28)
+- An ad-hoc 5-on-5 team game added on the day and ruled a full scored event. Played Friday night, after Bags.
+- **All 11 play** — 2 teams, 6v5 with Tyler on the 6-player side, exactly like Wiffle.
+- **Winner-take-all: every member of the winning team earns 100; losers earn 0.** Tyler plays, so he earns his own team's result directly — no backing, no burn.
+- Team event: ×1, the knob does not apply. Counts toward the §7 championship total like any other event.
+- Result as played: **Brad, Mitch, Yuyi, Josh, ATM, Tyler** won (100 each); Stu, Murph, Lucas, Helwig, Wyatt 0.
+- Captains (labels only): Brad, Stu.
+
 ## 5. Captainships & Drafts
 
 - 10 captain slots = 10 non-Brad players: Wiffle 2 (Murph, Stu) + Volleyball 3 (Mitch, Helwig, Wyatt) + Beer Ball 5 (Yuyi, Lucas, Josh, ATM, Tyler).
@@ -114,17 +123,18 @@ Tyler **plays** two events (Bags, Wiffle) and **owns/backs** four:
 | Swim | Picks one player before the event | That player's exact final (multiplied) points | **That player** |
 | Gauntlet | Picks one player before the event | That player's exact final (multiplied) points | **That player** |
 | Volleyball | Picks one team before game 1 | That team's exact final points | **That team's captain only** |
+| Super Volley Beer | Plays (§4.7) | His own team result | — |
 
 ### 6.1 The Burn Rule (hybrid)
-- Across Tyler's four backed events he "burns" **exactly 5 people, all of whom must be unique**: 2 beer ball pair members + Swim pick + Gauntlet pick + Volleyball team captain.
+- Across Tyler's four backed events he "burns" **5 people**: 2 beer ball pair members + Swim pick + Gauntlet pick + Volleyball team captain.
 - Rationale for the hybrid: burn scales with concentration of exposure. Individual picks and pair members are full exposure (burned); a volleyball roster is diluted (captain-only burn).
-- **Picks lock in schedule order** (Beer Ball pair Friday → Swim → Volleyball team → Gauntlet), each before its event begins. Tyler's pool shrinks as the weekend progresses — this is intentional strategy.
-- **The app must validate uniqueness** across all 5 burns and refuse/flag a duplicate at entry time. Show Tyler's remaining eligible pool for each upcoming pick.
-- Note the Volleyball constraint: Tyler cannot pick the team whose captain he has already burned, and picking a team burns its captain for the Gauntlet.
+- **Picks lock in schedule order**, each before its event begins (the app treats that event's finalization as the lock).
+- **Burns need not be unique (Brad, 2026-08-28).** Tyler may back the same player in more than one event; each pick pays its event's points. The app records burns for display only and no longer refuses or flags a repeat. *Ruled mid-combine after Tyler picked Team Mitch for Volleyball and then drafted Mitch into his Beer Ball pair — both count.*
+- *Superseded original wording, kept for the record:* "all of whom must be unique … the app must validate uniqueness across all 5 burns and refuse/flag a duplicate at entry time … Tyler cannot pick the team whose captain he has already burned."
 
 ## 7. Championship & Tiebreakers
 
-- Champion = highest total points across all six events.
+- Champion = highest total points across all seven events (six originally; §4.7 added 2026-08-28).
 - **Tie on total:** lowest **average placement across the three individual events** wins. For Swim and Gauntlet, Tyler's placement = his picked player's placement; for Bags, his own.
 - **Still tied:** beer pong, head-to-head.
 
@@ -157,6 +167,7 @@ Only Brad enters data. Everyone else views. Standings page is the centerpiece �
 1. Golf (morning) — exhibition, no points
 2. Wiffle draft → **WIFFLE BALL** (combine opener)
 3. Beer Ball draft (Shithead sets order 2–5; Tyler snakes 1st/6th; burns 2) → **BEER BALL**
+4. **SUPER VOLLEY BEER** (added 2026-08-28 — 5v5 + Tyler, winner-take-all)
 
 **Saturday**
 1. Tyler's Swim pick locks (burn 3) → **SWIM** (locked opener)
@@ -170,7 +181,7 @@ No clock times anywhere — order only.
 
 ## 10. Validation Rules (must-haves)
 
-1. Tyler's 5 burns all unique; block duplicates at entry.
+1. ~~Tyler's 5 burns all unique; block duplicates at entry.~~ Dropped 2026-08-28 (§6.1): repeats are allowed and recorded, never blocked.
 2. Each able player on exactly one team per team event; beer ball pairs are exactly 2.
 3. Tyler auto-assigned to the 6-side in Wiffle.
 4. Knob within 1.0–2.0.
