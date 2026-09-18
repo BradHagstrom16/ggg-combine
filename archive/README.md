@@ -30,6 +30,9 @@ issues**, champion **Josh**:
 
 ## Replay it
 
+Run this from **this `archive/` directory** so `../src/scoring.js` and
+`./live-2026-final.json` resolve:
+
 ```bash
 node --input-type=module -e "
 import { effectiveLog, score } from '../src/scoring.js';
